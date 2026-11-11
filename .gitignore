@@ -1,0 +1,15 @@
+# Blender 설치본 / 다운로드 tarball (커밋 금지)
+# setup_blender.sh 기본 설치 위치는 ~/blender 이지만, BLENDER_DIR 로 저장소 안에 설치한 경우 대비
+/blender/
+/blender.stage.*/
+blender-*-linux-x64/
+*.tar.xz
+*.tar.xz.part
+
+# Blender 자동 백업 파일
+*.blend1
+*.blend2
+
+# Python
+__pycache__/
+*.pyc
