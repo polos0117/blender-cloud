@@ -99,6 +99,7 @@ BLENDER_VERSION=5.2.4 FORCE=1 ./setup_blender.sh
 
 1. 렌더 → `renders/` 에 저장
 2. 웹에 쓸 것만 `blender-cloud-img/img/<날짜>_<이름>.<확장자>` 로 옮겨 push (예: `2026-11-11_room.webp`)
+   - 클라우드 세션: 그림 저장소에 쓰기 권한을 붙이고 `/home/user/blender-cloud-img` 에 클론해 거기서 커밋·push 한다(2026-11-11 확인)
 3. 갤러리 https://polos0117.github.io/blender-cloud/ (공방 모음 허브 맨 아래 「3D 공방」)에 바로 뜬다 — `index.html` 이 그림 저장소의 `img/` 를 GitHub API 로 읽는다. 목록 파일은 없다.
 
 웹용 권장: 투명 배경 PNG/WebP, 2~4초 루프 영상(1MB 안팎), 압축한 .glb. iPhone Safari 는 투명 WebM 을 못 튼다.
