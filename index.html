@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D 공방</title>
+<style>
+  :root { --bg: #111317; --card: #1a1d23; --line: #ffffff22; --text: #e8e6e1; --muted: #9a9890; --gold: #d9b45a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  header { padding: 20px 16px 8px; max-width: 1200px; margin: auto; }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  h1 { margin: 6px 0 2px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 12px 16px 40px; max-width: 1200px; margin: auto; }
+  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  figure img, figure video, figure model-viewer { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #0b0c0f; }
+  figcaption { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 13px; color: var(--muted); }
+  figcaption a { color: var(--gold); text-decoration: none; white-space: nowrap; }
+  .note { grid-column: 1 / -1; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← 공방 모음</a>
+  <h1>3D 공방</h1>
+  <p>클라우드에서 Blender로 만든 렌더 · 영상 · 3D 모델</p>
+</header>
+<main id="list"><p class="note">불러오는 중…</p></main>
+<script>
+// renders/ 를 GitHub API 로 읽는다 — 목록 파일을 따로 관리하지 않는다.
+// ponytail: 익명 API 는 IP 당 시간 60회, 넘으면 renders/index.json 목록으로 바꾼다
+const IMG = /\.(png|jpe?g|webp|gif|avif)$/i, VID = /\.(webm|mp4)$/i, GLB = /\.glb$/i;
+const list = document.getElementById('list');
+fetch('https://api.github.com/repos/polos0117/blender-cloud/contents/renders')
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(files => {
+    files = files.filter(f => IMG.test(f.name) || VID.test(f.name) || GLB.test(f.name))
+                 .sort((a, b) => b.name.localeCompare(a.name));   // 이름 앞에 날짜를 붙이면 새것이 위로
+    if (!files.length) { list.innerHTML = '<p class="note">아직 렌더가 없어요.</p>'; return; }
+    if (files.some(f => GLB.test(f.name))) {
+      const s = document.createElement('script');
+      s.type = 'module'; s.src = 'https://cdn.jsdelivr.net/npm/@google/model-viewer@4.0.0/dist/model-viewer.min.js';
+      document.head.append(s);
+    }
+    list.innerHTML = '';
+    for (const f of files) {
+      const src = 'renders/' + encodeURIComponent(f.name);
+      const fig = document.createElement('figure');
+      fig.innerHTML =
+        IMG.test(f.name) ? `<img src="${src}" alt="${f.name}" loading="lazy">` :
+        VID.test(f.name) ? `<video src="${src}" autoplay loop muted playsinline></video>` :
+        `<model-viewer src="${src}" alt="${f.name}" camera-controls auto-rotate touch-action="pan-y"></model-viewer>`;
+      const cap = document.createElement('figcaption');
+      cap.innerHTML = `<span></span><a href="${src}" download>받기</a>`;
+      cap.firstChild.textContent = f.name;
+      fig.append(cap); list.append(fig);
+    }
+  })
+  .catch(e => { list.innerHTML = `<p class="note">목록을 못 불러왔어요 (${e}). 잠시 뒤 새로 고침해 주세요.</p>`; });
+</script>
+</body>
+</html>

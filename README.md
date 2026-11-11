@@ -92,3 +92,12 @@ BLENDER_VERSION=5.2.4 FORCE=1 ./setup_blender.sh
 | OS | Ubuntu 24.04, 4 vCPU (x86_64) |
 | 렌더 시간 | 약 14~16초 (32 샘플 + OIDN 디노이즈), Blender 전체 실행 약 17초 |
 | 설치 시간 | 첫 설치 약 38초(다운로드 포함), 재실행 시 1초 미만 |
+
+## 갤러리 사이트
+
+`index.html` 이 `renders/` 폴더를 GitHub API 로 읽어 이미지(png/jpg/webp)·영상(webm/mp4)·3D 모델(.glb)을 보여 줍니다.
+주소: https://polos0117.github.io/blender-cloud/ (공방 모음 허브 맨 아래 「3D 공방」)
+
+- 결과물은 `renders/` 에 넣고 push 하면 끝 — 목록 파일은 따로 없습니다.
+- 파일 이름 앞에 날짜를 붙이면(`2026-11-11_room.png`) 새것이 위로 옵니다.
+- 웹용은 투명 배경 PNG/WebP, 1MB 안팎 루프 영상, 압축한 .glb 를 권장합니다. iPhone Safari 는 투명 WebM 을 못 틀어요.
