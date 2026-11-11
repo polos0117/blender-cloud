@@ -28,11 +28,12 @@
 </header>
 <main id="list"><p class="note">불러오는 중…</p></main>
 <script>
-// renders/ 를 GitHub API 로 읽는다 — 목록 파일을 따로 관리하지 않는다.
-// ponytail: 익명 API 는 IP 당 시간 60회, 넘으면 renders/index.json 목록으로 바꾼다
+// 그림 저장소(blender-cloud-img)의 img/ 를 GitHub API 로 읽는다 — 목록 파일을 따로 관리하지 않는다.
+// ponytail: 익명 API 는 IP 당 시간 60회, 넘으면 그림 저장소에 img.json 목록을 두고 그것을 읽는다
 const IMG = /\.(png|jpe?g|webp|gif|avif)$/i, VID = /\.(webm|mp4)$/i, GLB = /\.glb$/i;
+const BASE = '/blender-cloud-img/img/';
 const list = document.getElementById('list');
-fetch('https://api.github.com/repos/polos0117/blender-cloud/contents/renders')
+fetch('https://api.github.com/repos/polos0117/blender-cloud-img/contents/img')
   .then(r => r.ok ? r.json() : Promise.reject(r.status))
   .then(files => {
     files = files.filter(f => IMG.test(f.name) || VID.test(f.name) || GLB.test(f.name))
@@ -45,7 +46,7 @@ fetch('https://api.github.com/repos/polos0117/blender-cloud/contents/renders')
     }
     list.innerHTML = '';
     for (const f of files) {
-      const src = 'renders/' + encodeURIComponent(f.name);
+      const src = BASE + encodeURIComponent(f.name);
       const fig = document.createElement('figure');
       fig.innerHTML =
         IMG.test(f.name) ? `<img src="${src}" alt="${f.name}" loading="lazy">` :

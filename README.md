@@ -2,7 +2,7 @@
 
 Linux 서버(GUI 없음)에서 Blender를 **headless**로 실행해 씬을 만들고 Cycles로 렌더링하는 파이프라인 테스트입니다.
 
-![테스트 렌더](renders/test_render.png)
+![테스트 렌더](https://polos0117.github.io/blender-cloud-img/img/2026-11-11_test_render.png)
 
 ## 구성
 
@@ -11,7 +11,7 @@ Linux 서버(GUI 없음)에서 Blender를 **headless**로 실행해 씬을 만�
 | `setup_blender.sh` | Blender LTS(Linux x64) 다운로드·설치 스크립트. 여러 번 실행해도 안전(멱등) |
 | `scenes/test_scene.py` | bpy 씬 생성 + 렌더 스크립트 |
 | `scenes/test_scene.blend` | 스크립트가 저장한 씬 파일 |
-| `renders/test_render.png` | 스크립트가 저장한 렌더 결과 |
+| `renders/` | 렌더 작업 폴더(커밋 안 함) — 결과물은 그림 저장소로 옮긴다 |
 
 Blender 바이너리는 저장소에 포함하지 않습니다(기본 설치 위치 `~/blender`, `.gitignore` 참고).
 
@@ -56,7 +56,7 @@ BLENDER_VERSION=5.2.4 FORCE=1 ./setup_blender.sh
 
 결과:
 
-- `renders/test_render.png` — 1280x720, RGBA 8bit PNG
+- `renders/test_render.png` — 1280x720, RGBA 8bit PNG (작업 폴더, 커밋 안 함)
 - `scenes/test_scene.blend` — 생성된 씬(Blender에서 열어 확인 가능)
 
 씬 내용:
@@ -93,11 +93,12 @@ BLENDER_VERSION=5.2.4 FORCE=1 ./setup_blender.sh
 | 렌더 시간 | 약 14~16초 (32 샘플 + OIDN 디노이즈), Blender 전체 실행 약 17초 |
 | 설치 시간 | 첫 설치 약 38초(다운로드 포함), 재실행 시 1초 미만 |
 
-## 갤러리 사이트
+## 결과물과 갤러리
 
-`index.html` 이 `renders/` 폴더를 GitHub API 로 읽어 이미지(png/jpg/webp)·영상(webm/mp4)·3D 모델(.glb)을 보여 줍니다.
-주소: https://polos0117.github.io/blender-cloud/ (공방 모음 허브 맨 아래 「3D 공방」)
+결과물은 이 저장소가 아니라 그림 저장소 [blender-cloud-img](https://github.com/polos0117/blender-cloud-img) 의 `img/` 에 둔다(다른 공방의 `*-img` 저장소와 같은 방식). `renders/` 는 작업 폴더라 커밋하지 않는다.
 
-- 결과물은 `renders/` 에 넣고 push 하면 끝 — 목록 파일은 따로 없습니다.
-- 파일 이름 앞에 날짜를 붙이면(`2026-11-11_room.png`) 새것이 위로 옵니다.
-- 웹용은 투명 배경 PNG/WebP, 1MB 안팎 루프 영상, 압축한 .glb 를 권장합니다. iPhone Safari 는 투명 WebM 을 못 틀어요.
+1. 렌더 → `renders/` 에 저장
+2. 웹에 쓸 것만 `blender-cloud-img/img/<날짜>_<이름>.<확장자>` 로 옮겨 push (예: `2026-11-11_room.webp`)
+3. 갤러리 https://polos0117.github.io/blender-cloud/ (공방 모음 허브 맨 아래 「3D 공방」)에 바로 뜬다 — `index.html` 이 그림 저장소의 `img/` 를 GitHub API 로 읽는다. 목록 파일은 없다.
+
+웹용 권장: 투명 배경 PNG/WebP, 2~4초 루프 영상(1MB 안팎), 압축한 .glb. iPhone Safari 는 투명 WebM 을 못 튼다.

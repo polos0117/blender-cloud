@@ -13,3 +13,6 @@ blender-*-linux-x64/
 # Python
 __pycache__/
 *.pyc
+
+# 렌더 작업 폴더 — 결과물은 blender-cloud-img 로
+/renders/
