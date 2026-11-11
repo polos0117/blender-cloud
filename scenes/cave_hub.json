@@ -1,0 +1,116 @@
+{
+  "_comment": "공방 허브 「대미궁」 구조 설정. rooms 순서 = 각 벽에서 위→아래. 방을 넣고 빼면 cave_hub.py 가 세로로 다시 나눈다. rise = 둘레 길보다 높은 정도(2.0 이상이면 나선 계단), color = 색깔 지도의 색(안 적으면 palette 에서 남는 색).",
+  "image": { "width": 1024, "height": 2048 },
+  "camera": {
+    "elevation_deg": 60,
+    "margin_top": 0.02,
+    "margin_bottom": 0.025,
+    "side_pad": 0.5,
+    "cliff_show": 1.4
+  },
+  "lake": {
+    "half_width": 4.3,
+    "half_length": 22.5,
+    "exponent": 2.6,
+    "bed_z": -1.4,
+    "shore": 0.5
+  },
+  "ring": {
+    "width": 1.6,
+    "z": 1.0,
+    "shelf_drop": 0.5,
+    "shelf_width": 2.0,
+    "rail_height": 0.7,
+    "post_spacing": 1.0,
+    "lantern_spacing": 4.4,
+    "lantern_height": 2.1
+  },
+  "rooms_layout": {
+    "radius": 3.65,
+    "wall": 0.35,
+    "wall_front": 0.9,
+    "wall_back": 2.4,
+    "gap": 0.35,
+    "span": [-0.9, 0.9],
+    "corridor": 2.6,
+    "door_yaw_deg": 20,
+    "door_width": 1.3,
+    "door_height": 2.0,
+    "door_jamb": 0.3,
+    "deck_width": 1.4,
+    "balcony_width": 2.5,
+    "balcony_depth": 1.1,
+    "step_rise": 0.2,
+    "step_run": 0.32,
+    "spiral_min_rise": 2.0,
+    "spiral_steps": 12,
+    "spiral_r_in": 0.25,
+    "spiral_r_out": 1.35,
+    "rise_pattern": [1.0, 0.6, 1.2, 0.4, 0.8]
+  },
+  "rooms": [
+    { "key": "gundam",  "name": "건담 격납고",      "side": "left",  "rise": 1.2, "color": "#ff0000" },
+    { "key": "pokemon", "name": "포켓몬 연구소",    "side": "left",  "rise": 2.4, "color": "#00ff00" },
+    { "key": "game",    "name": "게임 오락실",      "side": "left",  "rise": 0.6, "color": "#0000ff" },
+    { "key": "dot",     "name": "도트 공방",        "side": "left",  "rise": 1.0, "color": "#ffff00" },
+    { "key": "city",    "name": "도시공방",         "side": "left",  "rise": 0.4, "color": "#ff00ff" },
+    { "key": "book",    "name": "책의 서재",        "side": "right", "rise": 0.8, "color": "#00ffff" },
+    { "key": "samguk",  "name": "삼국지 군막",      "side": "right", "rise": 0.4, "color": "#ff8000" },
+    { "key": "myth",    "name": "신화 무기 대장간", "side": "right", "rise": 1.2, "color": "#8000ff" },
+    { "key": "image",   "name": "이미지 공방",      "side": "right", "rise": 2.4, "color": "#00ff80" },
+    { "key": "style",   "name": "화풍공방",         "side": "right", "rise": 0.6, "color": "#ff0080" },
+    { "key": "element", "name": "원소의 섬",        "side": "island", "color": "#80ff00" }
+  ],
+  "island": {
+    "y": 0.0,
+    "platform_radius": 1.9,
+    "platform_z": 1.0,
+    "bridge_side": "right",
+    "bridge_width": 1.2,
+    "bridge_hump": 0.45,
+    "spire_height": 3.4
+  },
+  "entrance": {
+    "stair_width": 3.6,
+    "flights": [9, 9],
+    "step_rise": 0.2,
+    "step_run": 0.42,
+    "landing": 2.0,
+    "terrace": 2.8,
+    "gate_height": 3.9,
+    "mouth_height": 2.7,
+    "fall_x": -8.0,
+    "fall_width": 2.4
+  },
+  "north": {
+    "pool_radius": 3.0,
+    "pool_gap": 0.7,
+    "canopy_z": [8.6, 10.3],
+    "fall_x": [-1.7, 1.7],
+    "fall_width": 1.0,
+    "stalactites": 34
+  },
+  "terrain": {
+    "step": 0.16,
+    "plateau_z": 2.5,
+    "plateau_slope": 0.1,
+    "noise": 0.4,
+    "back_wall_rise": 7.0,
+    "lake_rocks": 12,
+    "seed": 7
+  },
+  "render": {
+    "samples": 64,
+    "denoise": true,
+    "data_scale": 2,
+    "line_width": 1,
+    "edge_normal_deg": 28,
+    "edge_depth": 0.12,
+    "edge_steep": 0.55
+  },
+  "palette": [
+    "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
+    "#ff8000", "#8000ff", "#00ff80", "#ff0080", "#80ff00", "#0080ff",
+    "#804000", "#408080", "#c0c0c0", "#800000"
+  ]
+}

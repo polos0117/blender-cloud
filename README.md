@@ -11,6 +11,8 @@ Linux 서버(GUI 없음)에서 Blender를 **headless**로 실행해 씬을 만�
 | `setup_blender.sh` | Blender LTS(Linux x64) 다운로드·설치 스크립트. 여러 번 실행해도 안전(멱등) |
 | `scenes/test_scene.py` | bpy 씬 생성 + 렌더 스크립트 |
 | `scenes/test_scene.blend` | 스크립트가 저장한 씬 파일 |
+| `scenes/cave_hub.py` · `cave_hub.json` | 공방 허브 「대미궁」 지도의 3D 구조 생성 + 렌더 + 좌표 출력 (아래 3절) |
+| `scenes/cave_hub.blend` | 위 스크립트가 저장한 대미궁 씬 |
 | `renders/` | 렌더 작업 폴더(커밋 안 함) — 결과물은 그림 저장소로 옮긴다 |
 
 Blender 바이너리는 저장소에 포함하지 않습니다(기본 설치 위치 `~/blender`, `.gitignore` 참고).
@@ -83,6 +85,58 @@ BLENDER_VERSION=5.2.4 FORCE=1 ./setup_blender.sh
 ```
 
 참고: GPU 가 없는 서버에서는 `CUEW initialization failed` 경고가 나오지만 CUDA 탐지 실패 메시지일 뿐 CPU 렌더에는 영향이 없습니다.
+
+## 3. 대미궁 구조 (공방 허브 지도)
+
+공방 모음 허브 첫 화면의 세로 지도(1024×2048)를 그리기 위한 **정확한 3D 구조**를 만든다. 가운데 지하 호수와 바위섬 신전, 호수를 한 바퀴 도는 둘레 길, 양쪽 벽의 둥근 방들, 아래쪽 절벽의 입구 계단으로 된 산속 드워프 대미궁이다. 화풍 칠은 여기서 하지 않고, 뽑은 구조 그림을 이미지 모델에 첨부해 입힌다.
+
+![대미궁 구조](https://polos0117.github.io/blender-cloud-img/img/2026-11-11_cave-structure.png)
+
+```bash
+~/blender/blender -b --python scenes/cave_hub.py -- --out renders/
+```
+
+`renders/` 에 아래 파일이 나오고 `scenes/cave_hub.blend` 가 저장된다.
+
+| 파일 | 내용 |
+| --- | --- |
+| `cave-structure.png` | 구조 그림. 회색 점토 재질(지은 것은 밝게, 바위는 중간, 물은 어둡게) + 그림자 |
+| `cave-lines.png` | 선 그림. 흰 바탕에 검은 윤곽선 |
+| `cave-ids.png` · `cave-ids.json` | 방 색깔 지도(안티에일리어싱 없음, 나머지는 검정)와 색 ↔ 방 열쇠 표 |
+| `cave-depth.png` | 깊이 그림. 가까울수록 밝은 8비트 회색조 |
+| `cave-rooms.json` | 허브용 좌표: 방마다 바닥 다각형 `poly`(8각) · 이름표 자리 `at`, 길 셋 `ways`(SVG path) |
+| `cave-report.json` | 검사 결과와 렌더 시간 (올리지 않는 작업 기록) |
+
+그림 저장소에 올릴 때는 날짜를 붙여 복사한다.
+
+```bash
+for f in cave-structure.png cave-lines.png cave-ids.png cave-ids.json cave-depth.png cave-rooms.json; do cp renders/$f ../blender-cloud-img/img/$(date +%F)_$f; done
+```
+
+### 방 넣고 빼기
+
+방 목록과 배치 값은 모두 `scenes/cave_hub.json` 에 있다. `rooms` 에 한 줄을 넣고 다시 돌리면 그 벽의 방 수로 세로를 다시 나누고(자리가 모자라면 모든 방의 반지름을 같이 줄인다), 복도 · 난간 틈 · 좌표 · 색 표가 다시 나온다.
+
+```json
+{ "key": "newroom", "name": "새 방", "side": "left", "rise": 1.0 }
+```
+
+- 순서: 각 벽(`left` / `right`)에서 적힌 차례가 위 → 아래. `island` 는 가운데 섬(다각형은 호수 영역).
+- `rise`: 둘레 길보다 높은 정도. 2.0 이상이면 나선 계단, 그보다 낮으면 곧은 계단으로 잇는다.
+- `color`: 색깔 지도의 색. 안 적으면 `palette` 에서 남는 색을 받는다(기존 방의 색은 그대로).
+
+### 구조와 검사
+
+- 좌표계: X = 좌우, +Y = 그림 위쪽, Z = 높이(호수 수면 0, 둘레 길 1.0, 방 바닥 1.4~3.4, 입구 −2.6). 카메라는 남쪽 위 60°에서 내려다보는 정사영이라 투영이 단순하다.
+- 길 검사: 방마다 둘레 길 → 다리 → 계단(또는 나선 계단) → 발코니 → 문 → 방 가운데까지 가운뎃줄을 5cm 간격으로 따라가며 아래로 광선을 쏴서, 걷는 면이 이어지는지 · 한 단보다 높은 턱이 없는지 · 난간이나 벽에 막히지 않는지 본다. 둘레 길 한 바퀴, 입구 계단, 섬 다리도 같이 본다. 하나라도 끊기면 종료 코드 2.
+- 겹침 검사: 방끼리, 방과 둘레 길, 방과 입구 골짜기 사이 간격을 계산한다.
+- 검사가 실제로 잡아내는지는 `--selftest-break city` 로 본다(그 방의 연결로를 빼고 만들면 실패해야 정상).
+- 선 그림은 Freestyle 대신 1샘플 데이터 패스(법선 · 깊이 · 오브젝트 번호)를 2배 크기로 구워 경계를 찾는다. 서로 파고든 덩어리의 경계와 물가 선도 빠지지 않는다. 색깔 지도도 같은 패스의 방 번호에서 만들어 색이 정확히 떨어진다.
+- 색깔 지도에서 `element`(섬) 색은 허브 다각형과 맞춰 호수 수면 · 섬 · 신전 · 다리 · 호수 바위를 덮는다. 방 색은 바닥 · 벽 · 문을 덮는다.
+
+옵션: `--prefix 2026-11-11_`(파일 이름 앞), `--samples N`, `--scale 0.5`(미리보기), `--check-only`(렌더 없이 검사와 JSON 만), `--no-blend`, `--config 다른설정.json`.
+
+2026-11-11 기준(4 vCPU, GPU 없음): 구조 그림 98초(64 샘플 + 디노이즈), 데이터 패스 5초, 전체 107초. 삼각형 약 25만 개.
 
 ## 테스트 결과 (참고)
 
