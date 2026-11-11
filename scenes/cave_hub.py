@@ -13,6 +13,9 @@ scenes/cave_hub.json 을 읽어 산속 드워프 대미궁 구조를 만들고, 
 """
 
 import argparse
+import copy
+from collections import deque
+from types import SimpleNamespace
 import json
 import math
 import os
@@ -46,6 +49,8 @@ def parse_args():
     p.add_argument("--check-only", action="store_true", help="구조 생성과 검사만 하고 렌더는 건너뛴다")
     p.add_argument("--no-blend", action="store_true", help=".blend 를 저장하지 않는다")
     p.add_argument("--selftest-break", default=None, metavar="KEY", help="검사 자체를 시험: 이 방의 연결로를 빼고 만든다 (길 검사가 실패해야 정상)")
+    p.add_argument("--levels", type=int, choices=(1, 2), default=None)
+    p.add_argument("--selftest-nav-break", metavar="KEY", help="이 문 노드를 고립시켜 그래프 검사를 시험")
     return p.parse_args(argv)
 
 
@@ -277,6 +282,7 @@ def arch_profile(half_open, height, jamb, flat_top=None, segs=12, rough=None):
 class Plan:
     def __init__(self, cfg):
         self.cfg = cfg
+        self.two = cfg.get("levels", {}).get("count", 1) == 2
         lk, rg, rl = cfg["lake"], cfg["ring"], cfg["rooms_layout"]
         self.oval = Oval(lk["half_width"], lk["half_length"], lk["exponent"])
         self.g = lk["shore"]                    # 물가 ~ 둘레 길 안쪽
@@ -290,13 +296,39 @@ class Plan:
         self.rooms = self._rooms(cfg, rl)
         self._entrance(cfg["entrance"])
         self._north(cfg["north"])
-        self._camera(cfg["camera"], cfg["image"])
+        # Preserve the original upper-floor projection exactly; extend only below.
+        legacy_image = dict(cfg["image"], height=cfg["image"]["width"] * 2)
+        self._camera(cfg["camera"], legacy_image if self.two else cfg["image"])
+        if self.two:
+            self.ortho *= cfg["image"]["height"] / legacy_image["height"]
+            self.v_min = self.v_max - self.ortho
+            self.fill["ortho"] = round(self.ortho, 2)
+            self.lower = cfg["levels"]["lower"]
+            self.spiral = cfg["levels"]["spiral"]
+            self.lower_rooms = []
+            low = self.lower
+            for source in cfg["rooms"]:
+                if source.get("level", 1) != 2:
+                    continue
+                r = dict(source)
+                cx, cy = source["position"]
+                d = v_norm((cx, cy - low["hall_y"]))
+                P = (d[0] * low["path_radius"], low["hall_y"] + d[1] * low["path_radius"])
+                length = math.dist(P, (cx, cy)) - low["room_radius"] - self.wall
+                r.update(c=(cx, cy), zf=low["z"], P=P, d=d, n=rot90(d), L=length,
+                         rise=0, link="bridge", index=len(self.lower_rooms), level=2)
+                self.lower_rooms.append(r)
+            self.y_cliff = low["entrance"][1] - 2.0
+            self.z_entry = low["entrance"][2]
+
 
     # -- 방: 한쪽 벽의 방 수로 세로를 나누고, 문에서 둘레 길까지 복도를 잇는다
     def _rooms(self, cfg, rl):
         sides = {"left": [], "right": []}
         self.island_room = None
         for r in cfg["rooms"]:
+            if r.get("level", 1) != 1:
+                continue
             if r["side"] == "island":
                 self.island_room = r
             else:
@@ -327,7 +359,7 @@ class Plan:
                 y_p = yc - reach * d[1]
                 p = (sgn * self.oval.hw(self.t_out, y_p), y_p)  # 둘레 길 바깥 가장자리의 이음점
                 out.append({
-                    "key": r["key"], "name": r.get("name", r["key"]), "side": side, "index": i,
+                    "level": 1, "color": r.get("color"), "key": r["key"], "name": r.get("name", r["key"]), "side": side, "index": i,
                     "c": v_add(p, d, reach), "zf": self.zr + rise, "rise": rise, "link": link, "steps": steps,
                     "P": p, "d": d, "n": rot90(d), "L": length, "low": low,
                 })
@@ -473,6 +505,8 @@ def terrain_height(plan, x, y):
         if r["link"] == "spiral":
             cx2, cy2 = r["tower"]
             h = carve(h, np.hypot(x - cx2, y - cy2) - 1.75, plan.ground, 0.7)
+    if plan.two:
+        return lower_terrain(plan, x, y, h)
     # 입구 계단 골짜기
     half = en["stair_width"] / 2 + 0.75
     canyon = np.maximum(np.abs(x) - half, y - (plan.stair_y0 - 0.6))
@@ -526,7 +560,10 @@ def build_water(plan, mats, coll):
     y0 = plan.oval.b + 0.5
     g.box(0.0, (y0 + plan.pool_y + plan.pool_r + 1.0) / 2, plan.pool_r * 1.15 + 1.0, -0.6, 0.0, half_y=(plan.pool_y + plan.pool_r + 1.0 - y0) / 2)
     en = plan.cfg["entrance"]
-    g.box(en["fall_x"], plan.y_cliff + 1.55, en["fall_width"] / 2 + 0.6, -1.2, -0.45, half_y=2.95)
+    if plan.two:
+        en = dict(en, fall_x=plan.lower["fall_x"])
+    pool_top = plan.z_entry + 0.4 if plan.two else -0.45
+    g.box(en["fall_x"], plan.y_cliff + 1.55, en["fall_width"] / 2 + 0.6, pool_top - 0.6, pool_top, half_y=2.95)
     g.obj("Water_pool", mats["water"], coll)
     # 폭포: 북쪽 천장에서 둘, 남쪽 절벽에서 하나
     g = Geo()
@@ -535,7 +572,7 @@ def build_water(plan, mats, coll):
         yf = float(plan.canopy_front(fx)) - 0.12
         g.box(fx, yf, no["fall_width"] / 2, -0.05, plan.canopy_zb + 0.3, half_y=0.13)
         g.prism(circle(fx, yf - 0.15, no["fall_width"] / 2 + 0.45, 20), -0.05, 0.05)      # 물보라 자리
-    g.box(en["fall_x"], plan.y_cliff - 1.25, en["fall_width"] / 2 - 0.15, plan.cliff_base, -0.5, half_y=0.16)
+    g.box(en["fall_x"], plan.y_cliff - 1.25, en["fall_width"] / 2 - 0.15, plan.cliff_base, plan.z_entry + 0.4 if plan.two else -0.5, half_y=0.16)
     g.obj("Waterfalls", mats["fall"], coll)
     return lake
 
@@ -599,7 +636,7 @@ def build_ring(plan, mats, coll):
             continue
         lantern(g, x, y, plan.zr, lh)
         count += 1
-    for sx in (-1, 1):                    # 입구 계단 위·아래에도 한 쌍씩
+    for sx in (() if plan.two else (-1, 1)):  # 한 층 모드의 입구 등불
         hw = plan.cfg["entrance"]["stair_width"] / 2 + 0.12
         for name, (s0, s1, z) in plan.stair_marks.items():
             lantern(g, sx * hw, plan.stair_y0 - (s0 + 0.35 if name == "terrace" else s1 - 0.3), z + 0.55, lh - 0.5)
@@ -1051,20 +1088,272 @@ def cubic_path(points):
 
 
 # ==========================================================================
+# 두 층: 공유 배치로 지형, 실제 보행면, 내보낼 경로를 함께 만든다
+# ==========================================================================
+def lower_entrance(plan):
+    low = plan.lower
+    a = math.radians(low["entrance_angle_deg"])
+    end = (low["path_radius"] * math.cos(a), low["hall_y"] + low["path_radius"] * math.sin(a), low["z"])
+    start = tuple(low["entrance"])
+    d = v_norm((end[0] - start[0], end[1] - start[1]))
+    length = math.dist(start[:2], end[:2])
+    steps = int(round((end[2] - start[2]) / 0.2))
+    route = [start, (*v_add(start, d, 1.4), start[2])]
+    for i in range(steps):
+        s0 = 1.4 + (length - 1.4) * i / steps
+        s1 = 1.4 + (length - 1.4) * (i + 1) / steps
+        z = start[2] + (end[2] - start[2]) * (i + 1) / steps
+        route.extend([(*v_add(start, d, s0), z), (*v_add(start, d, s1), z)])
+    route[-1] = end
+    return route
+
+
+def spiral_points(plan):
+    sp = plan.spiral
+    return [(sp["radius"] * math.cos(math.pi / 2 - sp["turns"] * TAU * i / (sp["steps"] * 4)),
+             sp["center_y"] + sp["radius"] * math.sin(math.pi / 2 - sp["turns"] * TAU * i / (sp["steps"] * 4)),
+             plan.zr + (plan.lower["z"] - plan.zr) * i / (sp["steps"] * 4))
+            for i in range(sp["steps"] * 4 + 1)]
+
+
+def lower_terrain(plan, x, y, upper):
+    low, sp = plan.lower, plan.spiral
+    floor = low["z"] - 0.45
+    lower = low["z"] + 1.9 + 0.28 * fbm(x, y, 37, 0.15)
+    mix = smoothstep(-36, -25, y)
+    h = lower * (1 - mix) + upper * mix
+    h = carve(h, np.hypot(x, y - low["hall_y"]) - low["hall_radius"], floor, 1.2)
+    for r in plan.lower_rooms:
+        h = carve(h, np.hypot(x - r["c"][0], y - r["c"][1]) - (low["room_radius"] + plan.wall - 0.05), floor, 0.5)
+        h = carve(h, seg_dist(x, y, r["P"], r["c"]) - low["bridge_width"] / 2 - 0.1, floor, 0.45)
+    h = carve(h, np.hypot(x, y - sp["center_y"]) - sp["radius"] - sp["width"] / 2 - 0.4, floor - 1, 1.0)
+    h = carve(h, np.maximum(np.abs(x) - sp["width"] / 2 - 0.25,
+                           np.maximum(y - (-plan.b_out + 0.1), low["hall_y"] - y)), floor - 0.3, 0.5)
+    en = lower_entrance(plan)
+    a, b = en[0], en[-1]
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    t = np.clip(((x-a[0])*dx+(y-a[1])*dy)/(dx*dx+dy*dy), 0, 1)
+    h = carve(h, seg_dist(x, y, a[:2], b[:2]) - low["entrance_width"] / 2 - 0.35,
+              a[2] + t * (b[2]-a[2]) - 0.55, 0.65)
+    h = carve(h, np.maximum(np.abs(x-low["fall_x"])-1.1, y-plan.y_cliff-3.5), plan.z_entry+0.3, 0.4)
+    drop = smoothstep(0, 1.1, plan.y_cliff + 0.3*np.sin(x) - y)
+    return h + (plan.cliff_base - h) * drop
+
+
+def build_lower(plan, mats, colls, broken):
+    low, sp = plan.lower, plan.spiral
+    z, hy, radius = low["z"], low["hall_y"], low["path_radius"]
+    g = Geo()
+    g.prism(circle(0, hy, low["hall_radius"], 144), z-0.65, z)
+    g.obj("Lower_hall", mats["built"], colls["Ring"], walk=True)
+    g = Geo()
+    for r in (1.4, 2.2, 2.5):
+        g.ribbon(circle(0, hy, r, 96), z+0.045, z+0.01, 0.07, closed=True)
+    for i in range(10):
+        a = TAU*i/10
+        x,y = 4.5*math.cos(a), hy+4.5*math.sin(a)
+        g.prism(circle(x,y,0.29,12), z, z+0.18)
+        g.prism(circle(x,y,0.20,12), z+0.18, z+2.4)
+        g.prism(circle(x,y,0.31,12), z+2.4, z+2.65)
+    g.obj("Hall_columns_and_rings", mats["built"], colls["Ring"])
+    loop = [(*p, z) for p in circle(0,hy,radius,200)]
+    entrance = lower_entrance(plan)
+    gaps = [(r["P"], 1.6) for r in plan.lower_rooms] + [(entrance[-1][:2],2.3), ((0,hy+radius),2.0)]
+    g = Geo()
+    for run in rail_runs(circle(0,hy,low["hall_radius"]-0.12,240), gaps):
+        g.ribbon(run,z+0.65,z+0.53,0.1)
+        for x,y in run[::5]:
+            g.box(x,y,0.055,z,z+0.6)
+    for i in range(12):
+        a=TAU*i/12
+        x,y=(radius+0.8)*math.cos(a),hy+(radius+0.8)*math.sin(a)
+        if all(math.dist((x,y),p)>r+0.3 for p,r in gaps):
+            lantern(g,x,y,z,1.6)
+    g.obj("Hall_rails_lanterns",mats["built"],colls["Ring"])
+    room_plan = SimpleNamespace(cfg=plan.cfg,R=low["room_radius"],wall=plan.wall,ground=z-0.45)
+    routes={}
+    for r in plan.lower_rooms:
+        build_room(room_plan,r,mats,colls["Rooms"])
+        door=v_add(r["P"],r["d"],r["L"])
+        g=Geo()
+        g.ribbon([r["P"],v_add(door,r["d"],0.1)],z-EPS,z-0.3,low["bridge_width"])
+        if r["key"] != broken:
+            g.obj("Link_"+r["key"],mats["built"],colls["Links"],walk=True)
+        g=Geo()
+        for side in (-1,1):
+            g.ribbon([v_add(r["P"],r["d"],1.0),door],z+0.55,z-0.03,0.1,offset=side*(low["bridge_width"]/2-0.05))
+        g.obj("Rails_"+r["key"],mats["built"],colls["Links"])
+        routes[r["key"]]=[(*r["P"],z),(*v_add(door,r["d"],0.7),z),(*r["c"],z)]
+    # A 1.5 turn staircase: opposite ends, sufficient headroom at the crossing.
+    helix=spiral_points(plan)
+    g=Geo()
+    for i in range(sp["steps"]):
+        aa=[math.pi/2-sp["turns"]*TAU*(i+j/4)/sp["steps"] for j in range(5)]
+        outer=[((sp["radius"]+sp["width"]/2)*math.cos(a),sp["center_y"]+(sp["radius"]+sp["width"]/2)*math.sin(a)) for a in aa]
+        inner=[((sp["radius"]-sp["width"]/2)*math.cos(a),sp["center_y"]+(sp["radius"]-sp["width"]/2)*math.sin(a)) for a in aa]
+        top=plan.zr+(z-plan.zr)*(i+1)/sp["steps"]
+        g.prism(outer+inner[::-1],top-0.22,top)
+    upper=(0,-(plan.oval.b+plan.t_mid),plan.zr)
+    lower=(0,hy+radius,z)
+    for a,b in ((upper,helix[0]),(helix[-1],lower)):
+        g.ribbon([a[:2],b[:2]],a[2]-EPS,a[2]-0.28,sp["width"])
+    if broken != "spiral":
+        g.obj("Grand_spiral_steps",mats["built"],colls["Links"],walk=True)
+    g=Geo()
+    for radial in (sp["radius"]-sp["width"]/2+0.05,sp["radius"]+sp["width"]/2-0.05):
+        pts=[(p[0]*radial/sp["radius"],sp["center_y"]+(p[1]-sp["center_y"])*radial/sp["radius"]) for p in helix]
+        zz=[p[2] for p in helix]
+        if radial > sp["radius"]:
+            pts, zz = pts[10:-10], zz[10:-10]  # radial landing openings
+        g.ribbon(pts,[v+sp["rail_height"] for v in zz],[v+sp["rail_height"]-0.1 for v in zz],0.09)
+        for i in range(0,len(pts),6):
+            g.box(*pts[i],0.05,zz[i]-0.1,zz[i]+sp["rail_height"])
+        if radial>sp["radius"]:
+            for i in range(12,len(pts),32):
+                lantern(g,*pts[i],zz[i],1.4)
+    g.obj("Grand_spiral_rails",mats["built"],colls["Links"])
+    # Entrance: broad stairs rise diagonally from the bottom-left cliff.
+    g=Geo()
+    xy=[p[:2] for p in entrance]; zz=[p[2] for p in entrance]
+    g.ribbon(xy,[v-EPS for v in zz],[v-0.4 for v in zz],low["entrance_width"])
+    g.obj("Lower_entrance_stairs",mats["built"],colls["Entrance"],walk=True)
+    g=Geo()
+    for side in (-1,1):
+        rail = [p for p in entrance if math.dist(p[:2], entrance[-1][:2]) > 2.5]
+        g.ribbon([p[:2] for p in rail],[p[2]+0.55 for p in rail],[p[2]-0.2 for p in rail],0.16,offset=side*(low["entrance_width"]/2))
+    start=entrance[0]
+    d=v_norm((entrance[-1][0]-start[0],entrance[-1][1]-start[1]))
+    g.profile(arch_profile(1.15,2.8,0.55),v_add(start,d,0.6),rot90(d),d,-0.25,0.25,start[2])
+    g.obj("Lower_entrance_arch_rails",mats["built"],colls["Entrance"])
+    return routes,loop,[upper]+helix+[lower],entrance
+
+
+def build_navigation(plan, px, ring, routes, island, hall, lower_routes, spiral, entrance, broken):
+    """Explicit 3D junctions, never screen-space proximity (spiral crossings are not junctions)."""
+    nodes, edges, positions, lookup = {}, set(), {}, {}
+    spacing=plan.cfg["levels"].get("nav_spacing_px",24)
+    def node(p,level):
+        key=tuple(round(float(x),5) for x in p)
+        if key not in lookup:
+            n=f"n{len(nodes)}"; lookup[key]=n; positions[n]=tuple(p)
+            foot,head=px(p),px((p[0],p[1],p[2]+1.6))
+            nodes[n]={"xy":foot,"level":level,"person_px":round(math.dist(foot,head),2)}
+        return lookup[key]
+    def line(points,level):
+        # Arc length in image pixels; sample independently between forced junctions.
+        screen=[px(p) for p in points]
+        cum=np.concatenate([[0],np.cumsum([math.dist(a,b) for a,b in zip(screen,screen[1:])])])
+        count=max(1,int(math.ceil(cum[-1]/spacing)))
+        pts=[]
+        for dist in np.linspace(0,cum[-1],count+1):
+            j=min(len(points)-2,max(0,int(np.searchsorted(cum,dist,side="right")-1)))
+            t=(dist-cum[j])/max(cum[j+1]-cum[j],1e-12)
+            pts.append(tuple(points[j][k]+(points[j+1][k]-points[j][k])*t for k in range(3)))
+        pts[0],pts[-1]=points[0],points[-1]
+        ids=[node(p,level if not callable(level) else level(p)) for p in pts]
+        for a,b in zip(ids,ids[1:]):
+            if a!=b: edges.add(tuple(sorted((a,b))))
+        return ids
+    def attach_loop(loop,branches,level):
+        # Include exact cardinal points and all branch intersections before resampling.
+        anchors={}
+        for key,route in branches.items():
+            i=min(range(len(loop)),key=lambda j: math.dist(loop[j],route[0]))
+            anchors[key]=i
+        cuts=sorted(set(anchors.values()))
+        for k,i in enumerate(cuts):
+            j=cuts[(k+1)%len(cuts)]
+            segment=(loop[i:j+1] if j>i else loop[i:]+loop[:j+1])
+            line(segment,level)
+        endpoints={}
+        for key,route in branches.items():
+            join=loop[anchors[key]]
+            points=[join]+route if math.dist(join,route[0])>1e-5 else route
+            if len(points)>1:
+                endpoints[key]=line(points,level)[-1]
+            else:
+                endpoints[key]=node(join,level)
+        return endpoints
+    def door_route(r,route):
+        door=v_add(r["P"],r["d"],r["L"]-0.28)
+        return route[:-2]+[(*door,r["zf"])]
+    upper={r["key"]:door_route(r,routes[r["key"]]) for r in plan.rooms}
+    if island: upper[plan.island_room["key"]]=island
+    upper["_south"]=[spiral[0]]
+    north=max(ring,key=lambda p:p[1]); upper["_north"]=[north]
+    upper_nodes=attach_loop(ring,upper,1)
+    lower={r["key"]:door_route(r,lower_routes[r["key"]]) for r in plan.lower_rooms}
+    lower["_spiral"]=[spiral[-1]]
+    lower["_entry"]=list(reversed(entrance))
+    lower_nodes=attach_loop(hall,lower,2)
+    line(spiral,lambda p:1 if p[2]>(plan.zr+plan.lower["z"])/2 else 2)
+    doors={k:v for k,v in {**upper_nodes,**lower_nodes}.items() if not k.startswith("_")}
+    start=lower_nodes["_entry"]
+    if broken:
+        victim=doors[broken]; edges={e for e in edges if victim not in e}
+    adjacency={n:[] for n in nodes}
+    for a,b in sorted(edges): adjacency[a].append(b); adjacency[b].append(a)
+    def search(source,target=None):
+        prev={source:None}; q=deque([source])
+        while q:
+            a=q.popleft()
+            if a==target: break
+            for b in adjacency[a]:
+                if b not in prev: prev[b]=a; q.append(b)
+        if target is None: return prev
+        if target not in prev: return []
+        out=[target]
+        while out[-1]!=source: out.append(prev[out[-1]])
+        return out[::-1]
+    reachable=search(start)
+    missing=[k for k,n in doors.items() if n not in reachable]
+    # One continuous walk with short out-and-back visits to the dead-end doors.
+    upper_order=sorted(plan.rooms,key=lambda r:(math.atan2(r["P"][1],r["P"][0])-math.pi/2)%TAU)
+    targets=[upper_nodes[r["key"]] for r in upper_order]
+    if island: targets.insert(next(i for i,r in enumerate(upper_order) if r["side"]=="right"),doors[plan.island_room["key"]])
+    targets += [upper_nodes["_north"],upper_nodes["_south"],lower_nodes["_spiral"]]
+    lower_order=sorted(plan.lower_rooms,key=lambda r:(math.atan2(r["P"][1]-plan.lower["hall_y"],r["P"][0])-math.pi/2)%TAU)
+    targets += [doors[r["key"]] for r in lower_order]+[start]
+    scroll=[upper_nodes["_north"]]
+    for target in targets:
+        segment=search(scroll[-1],target)
+        if not segment: break
+        scroll.extend(segment[1:])
+    bounds=all(0<=v["xy"][0]<=plan.cfg["image"]["width"] and 0<=v["xy"][1]<=plan.cfg["image"]["height"] for v in nodes.values())
+    ok=not missing and len(reachable)==len(nodes) and bounds and scroll[-1]==start and set(doors.values())<=set(scroll)
+    report={"ok":ok,"nodes":len(nodes),"edges":len(edges),"doors":len(doors),"reachable_doors":len(doors)-len(missing),"unreachable":missing,"all_nodes_reachable":len(reachable)==len(nodes),"in_bounds":bounds,"scroll_steps":len(scroll)}
+    nav={"size":[plan.cfg["image"]["width"],plan.cfg["image"]["height"]],"nodes":nodes,"edges":[list(e) for e in sorted(edges)],"doors":doors,"start":start,"scroll":scroll}
+    # Check the exported chords too: their interpolation must stay on actual floors.
+    deps=bpy.context.evaluated_depsgraph_get()
+    checks=[walk_test(bpy.context.scene,deps,"nav",[positions[a],positions[b]]) for a,b in edges]
+    failures=[c for c in checks if not c["ok"]]
+    report["walkable_edges"]=len(edges)-len(failures)
+    report["edge_failures"]=failures[:8]
+    report["ok"] &= not failures
+    return nav,report
+
+
+# ==========================================================================
 def main():
     args = parse_args()
     t_start = time.perf_counter()
     with open(args.config, encoding="utf-8") as f:
         cfg = json.load(f)
+    cfg = copy.deepcopy(cfg)
+    if args.levels is not None:
+        cfg.setdefault("levels", {})["count"] = args.levels
+    cfg["image"]["height"] = cfg["image"]["width"] * (3 if cfg.get("levels", {}).get("count", 1) == 2 else 2)
     os.makedirs(args.out, exist_ok=True)
 
     def out_path(name):
+        if cfg.get("levels", {}).get("count", 1) == 2:
+            name = name.replace("cave-", "cave2-", 1)
         return os.path.join(os.path.abspath(args.out), f"{args.prefix}{name}")
 
     plan = Plan(cfg)
     rl = cfg["rooms_layout"]
     palette = cfg["palette"]
-    keyed = plan.rooms + ([plan.island_room] if plan.island_room else [])
+    keyed = plan.rooms + ([plan.island_room] if plan.island_room else []) + (plan.lower_rooms if plan.two else [])
     if len(keyed) > min(len(palette), 63):
         raise SystemExit(f"palette 색({len(palette)})이 방 수({len(keyed)})보다 적다")
     used = {r["color"].lower() for r in keyed if r.get("color")}
@@ -1102,7 +1391,10 @@ def main():
         build_room(plan, r, mats, colls["Rooms"])
         routes[r["key"]] = build_link(plan, r, mats, colls["Links"], skip=(r["key"] == args.selftest_break))
     island_route = build_island(plan, mats, colls["Island"]) if plan.island_room else None
-    entrance_route = build_entrance(plan, mats, colls["Entrance"])
+    if plan.two:
+        lower_routes, hall_loop, spiral_route, entrance_route = build_lower(plan, mats, colls, args.selftest_break)
+    else:
+        entrance_route = build_entrance(plan, mats, colls["Entrance"])
     build_north(plan, mats, colls["North"])
     cam = setup_camera(plan, scene)
     setup_light(scene)
@@ -1126,6 +1418,18 @@ def main():
         res.update({"link": r["link"], "rise": r["rise"], "side": r["side"], "slot": r["index"] + 1})
         report["rooms"][r["key"]] = res
     walks = [report["ring"], report["entrance"]] + list(report["rooms"].values()) + ([report["island_bridge"]] if island_route else [])
+    if plan.two:
+        report["hall"] = walk_test(scene, deps, "hall", hall_loop + hall_loop[:1])
+        report["spiral"] = walk_test(scene, deps, "spiral", spiral_route)
+        report["lower_rooms"] = {r["key"]: walk_test(scene, deps, r["key"], lower_routes[r["key"]]) for r in plan.lower_rooms}
+        walks += [report["hall"], report["spiral"]] + list(report["lower_rooms"].values())
+        all_rooms = [(r, plan.R) for r in plan.rooms] + [(r, plan.lower["room_radius"]) for r in plan.lower_rooms]
+        gaps = [math.dist(a["c"], b["c"]) - ra - rb - 2 * plan.wall
+                for i, (a, ra) in enumerate(all_rooms) for b, rb in all_rooms[i+1:]]
+        report["overlap"]["all_floors_room_gap"] = round(min(gaps), 3)
+        report["overlap"]["ok"] &= min(gaps) > 0.05
+        for name in ("hall", "spiral", "lower_rooms"):
+            log(f"  {name}: {report[name]}")
     report["all_connected"] = all(w["ok"] for w in walks)
     for k, v in report["rooms"].items():
         log(f"  길 검사 {k:8s} {'OK ' if v['ok'] else 'FAIL'} {v.get('why', '')}{v['link']} +{v['rise']}")
@@ -1137,19 +1441,31 @@ def main():
         return [round(co.x * W, 1), round((1.0 - co.y) * H, 1)]
 
     rooms_json = {}
-    for r in plan.rooms:
+    for r in plan.rooms + (plan.lower_rooms if plan.two else []):
         cx, cy = r["c"]
-        ring8 = circle(cx, cy, plan.R * 1.04, 8, math.pi / 8, math.pi / 8 + TAU)
-        rooms_json[r["key"]] = {"poly": [px((x, y, r["zf"])) for x, y in ring8][::-1], "at": px((cx, cy, r["zf"]))}
+        radius = plan.lower["room_radius"] if r["level"] == 2 else plan.R
+        ring8 = circle(cx, cy, radius * 1.04, 8, math.pi / 8, math.pi / 8 + TAU)
+        rooms_json[r["key"]] = {"poly": [px((x, y, r["zf"])) for x, y in ring8][::-1], "at": px((cx, cy, r["zf"])), "level": r["level"]}
     if plan.island_room:
         o, b = plan.oval, plan.oval.b
         ys = (0.95 * b, 0.55 * b, -0.55 * b, -0.95 * b)
         lake8 = [(o.hw(0, y) * 1.04, y) for y in ys] + [(-o.hw(0, y) * 1.04, y) for y in reversed(ys)]
         isl = cfg["island"]
-        rooms_json[plan.island_room["key"]] = {"poly": [px((x, y, 0.0)) for x, y in lake8], "at": px((0.0, isl["y"], isl["platform_z"]))}
+        rooms_json[plan.island_room["key"]] = {"poly": [px((x, y, 0.0)) for x, y in lake8], "at": px((0.0, isl["y"], isl["platform_z"])), "level": 1}
     y_a, y_b = entrance_route[0][1], -(plan.oval.b + plan.t_mid)      # ① 입구 계단 → 호수 아래 끝
     stair_way = [(0.0, y_a, plan.z_entry), (0.0, (y_a + y_b) / 2, (plan.z_entry + plan.zr) / 2), (0.0, y_b, plan.zr)]
     ways3d = [stair_way, plan.ring_side("left"), plan.ring_side("right")]   # ② 둘레 길 왼쪽 ③ 오른쪽 (아래 끝 → 위 끝)
+    if plan.two:
+        ways3d = [entrance_route, hall_loop + hall_loop[:1], spiral_route,
+                  plan.ring_side("left", 65), plan.ring_side("right", 65)]
+        nav, nav_report = build_navigation(plan, px, ring_loop, routes, island_route,
+                                           hall_loop, lower_routes, spiral_route, entrance_route,
+                                           args.selftest_nav_break)
+        report["navigation"] = nav_report
+        report["all_connected"] &= nav_report["ok"]
+        with open(out_path("cave-nav.json"), "w", encoding="utf-8") as f:
+            json.dump(nav, f, ensure_ascii=False, indent=1)
+        log(f"  navigation: {nav_report}")
     hub = {"size": [W, H], "rooms": rooms_json, "ways": [cubic_path([px(p) for p in way]) for way in ways3d]}
     with open(out_path("cave-rooms.json"), "w", encoding="utf-8") as f:      # 방 하나에 한 줄
         rows = ",\n".join(f'    {json.dumps(k)}: {json.dumps(v)}' for k, v in rooms_json.items())
@@ -1158,6 +1474,11 @@ def main():
     ids_json = {r["color"]: r["key"] for r in keyed}
     with open(out_path("cave-ids.json"), "w", encoding="utf-8") as f:
         json.dump(ids_json, f, ensure_ascii=False, indent=1)
+
+    if not (report["all_connected"] and report["overlap"]["ok"]):
+        with open(out_path("cave-report.json"), "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=1)
+        raise SystemExit(2)
 
     # ---- 렌더 ----
     times = {}
@@ -1287,10 +1608,10 @@ def main():
     cyc.use_denoising = bool(rcfg["denoise"])
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_depth = "8"
-    scene.render.filepath = "//../renders/cave-structure.png"
+    scene.render.filepath = "//../renders/" + ("cave2" if plan.two else "cave") + "-structure.png"
     if not args.no_blend:
         os.makedirs(os.path.dirname(os.path.abspath(args.blend)), exist_ok=True)
-        bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath(args.blend), compress=True)
+        bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath(args.blend if not plan.two or args.blend != os.path.join(HERE, "cave_hub.blend") else os.path.join(HERE, "cave_hub2.blend")), compress=True)
     times["total"] = time.perf_counter() - t_start
     report["times_sec"] = {k: round(v, 1) for k, v in times.items()}
     report["layout"] = {"room_radius": round(plan.R, 3), "ortho_scale": round(plan.ortho, 3), "fill": plan.fill,

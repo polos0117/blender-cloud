@@ -1,6 +1,9 @@
 {
   "_comment": "공방 허브 「대미궁」 구조 설정. rooms 순서 = 각 벽에서 위→아래. 방을 넣고 빼면 cave_hub.py 가 세로로 다시 나눈다. rise = 둘레 길보다 높은 정도(2.0 이상이면 나선 계단), color = 색깔 지도의 색(안 적으면 palette 에서 남는 색).",
-  "image": { "width": 1024, "height": 2048 },
+  "image": {
+    "width": 1024,
+    "height": 3072
+  },
   "camera": {
     "elevation_deg": 60,
     "margin_top": 0.02,
@@ -31,7 +34,10 @@
     "wall_front": 0.9,
     "wall_back": 2.4,
     "gap": 0.35,
-    "span": [-0.9, 0.9],
+    "span": [
+      -0.9,
+      0.9
+    ],
     "corridor": 2.6,
     "door_yaw_deg": 20,
     "door_width": 1.3,
@@ -46,20 +52,157 @@
     "spiral_steps": 12,
     "spiral_r_in": 0.25,
     "spiral_r_out": 1.35,
-    "rise_pattern": [1.0, 0.6, 1.2, 0.4, 0.8]
+    "rise_pattern": [
+      1.0,
+      0.6,
+      1.2,
+      0.4,
+      0.8
+    ]
   },
   "rooms": [
-    { "key": "gundam",  "name": "건담 격납고",      "side": "left",  "rise": 1.2, "color": "#ff0000" },
-    { "key": "pokemon", "name": "포켓몬 연구소",    "side": "left",  "rise": 2.4, "color": "#00ff00" },
-    { "key": "game",    "name": "게임 오락실",      "side": "left",  "rise": 0.6, "color": "#0000ff" },
-    { "key": "dot",     "name": "도트 공방",        "side": "left",  "rise": 1.0, "color": "#ffff00" },
-    { "key": "city",    "name": "도시공방",         "side": "left",  "rise": 0.4, "color": "#ff00ff" },
-    { "key": "book",    "name": "책의 서재",        "side": "right", "rise": 0.8, "color": "#00ffff" },
-    { "key": "samguk",  "name": "삼국지 군막",      "side": "right", "rise": 0.4, "color": "#ff8000" },
-    { "key": "myth",    "name": "신화 무기 대장간", "side": "right", "rise": 1.2, "color": "#8000ff" },
-    { "key": "image",   "name": "이미지 공방",      "side": "right", "rise": 2.4, "color": "#00ff80" },
-    { "key": "style",   "name": "화풍공방",         "side": "right", "rise": 0.6, "color": "#ff0080" },
-    { "key": "element", "name": "원소의 섬",        "side": "island", "color": "#80ff00" }
+    {
+      "key": "gundam",
+      "name": "건담 격납고",
+      "side": "left",
+      "rise": 1.2,
+      "color": "#ff0000",
+      "level": 1
+    },
+    {
+      "key": "pokemon",
+      "name": "포켓몬 연구소",
+      "side": "left",
+      "rise": 2.4,
+      "color": "#00ff00",
+      "level": 1
+    },
+    {
+      "key": "game",
+      "name": "게임 오락실",
+      "side": "left",
+      "rise": 0.6,
+      "color": "#0000ff",
+      "level": 1
+    },
+    {
+      "key": "dot",
+      "name": "도트 공방",
+      "side": "left",
+      "rise": 1.0,
+      "color": "#ffff00",
+      "level": 1
+    },
+    {
+      "key": "city",
+      "name": "도시공방",
+      "side": "left",
+      "rise": 0.4,
+      "color": "#ff00ff",
+      "level": 1
+    },
+    {
+      "key": "book",
+      "name": "책의 서재",
+      "side": "right",
+      "rise": 0.8,
+      "color": "#00ffff",
+      "level": 1
+    },
+    {
+      "key": "samguk",
+      "name": "삼국지 군막",
+      "side": "right",
+      "rise": 0.4,
+      "color": "#ff8000",
+      "level": 1
+    },
+    {
+      "key": "myth",
+      "name": "신화 무기 대장간",
+      "side": "right",
+      "rise": 1.2,
+      "color": "#8000ff",
+      "level": 1
+    },
+    {
+      "key": "image",
+      "name": "이미지 공방",
+      "side": "right",
+      "rise": 2.4,
+      "color": "#00ff80",
+      "level": 1
+    },
+    {
+      "key": "style",
+      "name": "화풍공방",
+      "side": "right",
+      "rise": 0.6,
+      "color": "#ff0080",
+      "level": 1
+    },
+    {
+      "key": "element",
+      "name": "원소의 섬",
+      "side": "island",
+      "color": "#80ff00",
+      "level": 1
+    },
+    {
+      "key": "fav",
+      "name": "보물고",
+      "side": "left",
+      "level": 2,
+      "position": [
+        -11.4,
+        -42.5
+      ],
+      "color": "#0080ff"
+    },
+    {
+      "key": "status",
+      "name": "기록실",
+      "side": "left",
+      "level": 2,
+      "position": [
+        -11.4,
+        -53.5
+      ],
+      "color": "#804000"
+    },
+    {
+      "key": "sweep",
+      "name": "저울 시험실",
+      "side": "right",
+      "level": 2,
+      "position": [
+        11.4,
+        -42.5
+      ],
+      "color": "#408080"
+    },
+    {
+      "key": "review",
+      "name": "검수의 방",
+      "side": "right",
+      "level": 2,
+      "position": [
+        11.4,
+        -53.5
+      ],
+      "color": "#c0c0c0"
+    },
+    {
+      "key": "blender",
+      "name": "조형실",
+      "side": "bottom",
+      "level": 2,
+      "position": [
+        0,
+        -61.0
+      ],
+      "color": "#800000"
+    }
   ],
   "island": {
     "y": 0.0,
@@ -72,7 +215,10 @@
   },
   "entrance": {
     "stair_width": 3.6,
-    "flights": [9, 9],
+    "flights": [
+      9,
+      9
+    ],
     "step_rise": 0.2,
     "step_run": 0.42,
     "landing": 2.0,
@@ -85,8 +231,14 @@
   "north": {
     "pool_radius": 3.0,
     "pool_gap": 0.7,
-    "canopy_z": [8.6, 10.3],
-    "fall_x": [-1.7, 1.7],
+    "canopy_z": [
+      8.6,
+      10.3
+    ],
+    "fall_x": [
+      -1.7,
+      1.7
+    ],
     "fall_width": 1.0,
     "stalactites": 34
   },
@@ -109,8 +261,50 @@
     "edge_steep": 0.55
   },
   "palette": [
-    "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
-    "#ff8000", "#8000ff", "#00ff80", "#ff0080", "#80ff00", "#0080ff",
-    "#804000", "#408080", "#c0c0c0", "#800000"
-  ]
+    "#ff0000",
+    "#00ff00",
+    "#0000ff",
+    "#ffff00",
+    "#ff00ff",
+    "#00ffff",
+    "#ff8000",
+    "#8000ff",
+    "#00ff80",
+    "#ff0080",
+    "#80ff00",
+    "#0080ff",
+    "#804000",
+    "#408080",
+    "#c0c0c0",
+    "#800000"
+  ],
+  "levels": {
+    "count": 2,
+    "_comment": "--levels 1은 기존 1024×2048 구도. 두 층은 위층의 픽셀 위치를 유지해 아래로만 확장한다.",
+    "lower": {
+      "hall_y": -48.0,
+      "z": -4.0,
+      "path_radius": 6.3,
+      "hall_radius": 7.2,
+      "room_radius": 2.9,
+      "bridge_width": 1.6,
+      "entrance": [
+        -12.0,
+        -71.0,
+        -8.0
+      ],
+      "entrance_angle_deg": 225,
+      "entrance_width": 2.8,
+      "fall_x": -15.0
+    },
+    "spiral": {
+      "center_y": -31.0,
+      "radius": 3.2,
+      "width": 2.4,
+      "turns": 1.5,
+      "steps": 48,
+      "rail_height": 0.65
+    },
+    "nav_spacing_px": 24
+  }
 }
