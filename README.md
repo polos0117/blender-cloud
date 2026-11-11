@@ -13,6 +13,7 @@ Linux 서버(GUI 없음)에서 Blender를 **headless**로 실행해 씬을 만�
 | `scenes/test_scene.blend` | 스크립트가 저장한 씬 파일 |
 | `scenes/cave_hub.py` · `cave_hub.json` | 공방 허브 「대미궁」 지도의 3D 구조 생성 + 렌더 + 좌표 출력 (아래 3절) |
 | `scenes/cave_hub.blend` | 위 스크립트가 저장한 대미궁 씬 |
+| `scenes/dot_rig.py` · `scenes/dot_rig/` | 도트 인물을 부위별로 잘라 뼈대로 움직이기 (아래 4절) |
 | `renders/` | 렌더 작업 폴더(커밋 안 함) — 결과물은 그림 저장소로 옮긴다 |
 
 Blender 바이너리는 저장소에 포함하지 않습니다(기본 설치 위치 `~/blender`, `.gitignore` 참고).
@@ -137,6 +138,51 @@ for f in cave-structure.png cave-lines.png cave-ids.png cave-ids.json cave-depth
 옵션: `--prefix 2026-11-11_`(파일 이름 앞), `--samples N`, `--scale 0.5`(미리보기), `--check-only`(렌더 없이 검사와 JSON 만), `--no-blend`, `--config 다른설정.json`.
 
 2026-11-11 기준(4 vCPU, GPU 없음): 구조 그림 98초(64 샘플 + 디노이즈), 데이터 패스 5초, 전체 107초. 삼각형 약 25만 개.
+
+## 4. 도트 인물 뼈대 (종이 인형 방식)
+
+확정된 **정지 도트 한 장**을 부위별로 잘라 Blender 뼈대로 움직인다. 모든 칸이 같은 픽셀 조각에서 나오니 얼굴 · 옷 · 키가 칸마다 흔들리지 않고, 칸 수도 늘릴 수 있다. 첫 시험은 앨리스(192×256)다.
+
+![걷기 비교](https://polos0117.github.io/blender-cloud-img/img/2026-11-11_alice-walk-compare.webp)
+
+```bash
+~/blender/blender -b --python scenes/dot_rig.py -- --actor alice --out renders/
+```
+
+한 번에 하는 일: 부위 자르기(가려졌던 곳 메우기) → 부위마다 평면 판 + 뼈대 → 동작 → 4배 렌더 → 줄이고 색 맞추기 → 시트 · 미리보기 · 재생 설정.
+
+| 결과 (`renders/`) | 내용 |
+| --- | --- |
+| `alice-walk-rig.png` | 걷기 시트. 192×256 칸 8개(1536×256), 투명 배경 |
+| `alice-idle-rig.png` | 대기 시트. 칸 6개(1152×256) |
+| `alice-walk-rig-preview.webp` · `alice-idle-rig-preview.webp` | 2배 확대(nearest), 회색 바탕, 무한 반복 |
+| `alice-walk-compare.webp` | 왼쪽 예전 걷기(GPT 6칸) · 오른쪽 이번 걷기(8칸) |
+| `alice-rig.json` | 도트 공방 재생 설정 꼴: `frames` · `order` · `ms` · `speed` · `dy` |
+| `dot_rig/alice/` | 작업 기록: 부위 그림, 확인용 `parts_marked.png`(메운 곳 자홍 · 빌린 곳 청록), `report.json` |
+
+`scenes/dot_rig/alice.blend` 에 판 · 뼈대 · 두 동작(액션)이 저장된다. 미리보기 WebP 는 시스템 `python3` 의 Pillow 로 만든다(없으면 그 단계만 건너뛴다).
+
+### 파일
+
+- `scenes/dot_rig/<인물>_parts.json` — 인물마다 하나. 부위 경계(`runs` = [첫 줄, 끝 줄, 첫 칸, 끝 칸], `poly` = 다각형), 층(`z`), 관절 자리, 뼈대.
+  - `parts` 는 적힌 차례로 픽셀을 가져간다. `rest` 부위가 남은 픽셀을 모두 받는다.
+  - `share`: 관절이 벌어지지 않게 이웃 부위 픽셀을 빌려 겹쳐 둔다(무릎).
+  - `fill`: 앞 층 부위에 가려져 있던 곳을 제 픽셀의 가장 가까운 색으로 메운다. `extend`: 가려진 가장자리를 줄마다 몇 칸 잇고 윤곽선 색으로 닫는다. 둘 다 원본에 있는 색만 쓴다.
+- `scenes/dot_rig/motions/walk.json` · `idle.json` — 인물과 따로 쓰는 동작 값. 다리는 발 자리(보폭 대비 앞뒤, 드는 높이)로 적고 스크립트가 인물의 다리 길이로 관절 각도를 푼다. 팔 · 치마 · 리본은 각도, 오르내림은 픽셀.
+- 다른 인물: `<이름>_parts.json` 만 만들고 `--actor <이름>` 으로 돌린다. 뼈 이름(`thigh_1`, `forearm_2` …)을 같게 쓰면 같은 동작이 그대로 붙는다.
+
+### 픽셀 정리와 검사
+
+- 선 자세를 먼저 렌더해 **원본과 픽셀 하나까지 같은지** 본다(다르면 종료 코드 2). 부위 자르기 · 층 · 메우기가 틀리면 여기서 걸린다.
+- 4배(768×1024)로 굽고 192×256 으로 줄인다. 기본은 4×4 안에서 가장 많은 색을 고르고(`--reduce mode`), `--reduce nearest` 는 가운데 한 점만 쓴다. 돌아간 부위의 윤곽선은 mode 쪽이 덜 깨진다. 돌지 않는 부위(머리 · 몸통)는 두 방식 모두 원본 그대로다.
+- 색은 정지 도트의 색 목록으로 다시 맞추고, 알파는 0 아니면 255 다.
+- 디딘 발은 칸마다 같은 폭으로 뒤로 간다(앨리스: 보폭 40px, 칸마다 10px). `speed` = 보폭 ÷ 반 주기. 신발이 돌아도 발바닥의 가장 낮은 점이 땅에 오게 발 높이를 맞춘다.
+- 몸의 오르내림은 시트에 들어 있어 `dy` 는 0 이다. 걷는 동안 몸은 서 있을 때보다 접지 칸 2px · 사이 칸 1px 낮고 지나가는 칸에서 같은 높이다(다리가 곧게 펴진 길이를 넘지 않게).
+- 두 발의 땅 높이는 정지 도트 그대로다. 앨리스는 화면 왼쪽 발이 1px 높다(3/4 시점의 원근).
+
+옵션: `--prefix 2026-11-11_`, `--parts-only`(부위 자르기와 확인용 그림까지만), `--source 파일.png`(받지 않고 로컬 파일 사용), `--scale 4`, `--no-blend`.
+
+2026-11-11 기준(4 vCPU): 칸 15장 렌더 32초, 전체 35초.
 
 ## 테스트 결과 (참고)
 
