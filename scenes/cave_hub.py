@@ -51,6 +51,9 @@ def parse_args():
     p.add_argument("--selftest-break", default=None, metavar="KEY", help="검사 자체를 시험: 이 방의 연결로를 빼고 만든다 (길 검사가 실패해야 정상)")
     p.add_argument("--levels", type=int, choices=(1, 2), default=None)
     p.add_argument("--selftest-nav-break", metavar="KEY", help="이 문 노드를 고립시켜 그래프 검사를 시험")
+    p.add_argument("--light", default=None, metavar="TIME",
+                   help="시간대 빛 그림만 뽑는다: dawn · morning · night, 쉼표로 여럿, all 은 전부 (구조 그림 · .blend 는 건너뛴다)")
+    p.add_argument("--light-base", default=None, help="미리보기에 쓸 칠한 지도(파일 경로나 주소). 기본은 설정의 light.base")
     return p.parse_args(argv)
 
 
@@ -644,7 +647,11 @@ def build_ring(plan, mats, coll):
     return ring, count
 
 
+LANTERNS = []   # 등불 기둥의 불 자리 (빛 그림에서 점광원을 둔다)
+
+
 def lantern(g, x, y, z, h):
+    LANTERNS.append((x, y, z + h + 0.19))
     g.box(x, y, 0.07, z, z + h)
     g.box(x, y, 0.2, z + h, z + h + 0.38)
     g.cone(x, y, 0.3, z + h + 0.38, z + h + 0.62, segs=4, a0=math.pi / 4)
@@ -1074,6 +1081,313 @@ def render_data_pass(scene, mat, path, scale):
     return secs
 
 
+# ==========================================================================
+# 시간대 빛 그림 (--light): 칠한 지도 위에 겹쳐 시간대를 바꾸는 곱하기 · 더하기 그림
+# ==========================================================================
+def gaussian_blur(img, sigma):
+    if sigma <= 0:
+        return img
+    r = int(math.ceil(sigma * 3))
+    k = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma) ** 2)
+    k /= k.sum()
+    out = img.astype(np.float64)
+    for axis in (0, 1):
+        pad = [(0, 0)] * out.ndim
+        pad[axis] = (r, r)
+        src = np.pad(out, pad, mode="edge")
+        acc = np.zeros_like(out)
+        for i, kv in enumerate(k):
+            sl = [slice(None)] * out.ndim
+            sl[axis] = slice(i, i + out.shape[axis])
+            acc += kv * src[tuple(sl)]
+        out = acc
+    return out
+
+
+def save_webp(path, rgb, target_kb=None):
+    """(H, W, 3) 0~1 화면값 → WebP. target_kb 를 주면 그 크기에 들어오는 가장 높은 품질을 고른다."""
+    h, w = rgb.shape[:2]
+    img = bpy.data.images.new("webp_out", w, h, alpha=False, float_buffer=False)
+    buf = np.ones((h, w, 4), dtype=np.float32)
+    buf[:, :, :3] = np.clip(rgb[::-1], 0.0, 1.0)
+    img.pixels.foreach_set(buf.ravel())
+    img.file_format = "WEBP"
+    quality = 90
+    for quality in (96, 93, 90, 86, 82, 78, 72, 66, 58, 50, 40):
+        img.save(filepath=path, quality=quality)
+        if target_kb is None or os.path.getsize(path) <= target_kb * 1024:
+            break
+    bpy.data.images.remove(img)
+    return quality, os.path.getsize(path)
+
+
+def load_display(path_or_url, cache_dir):
+    """칠한 지도(파일이나 주소) → (H, W, 3) 0~1 화면값."""
+    path = path_or_url
+    if path_or_url.startswith("http"):
+        import urllib.request
+        path = os.path.join(cache_dir, os.path.basename(path_or_url.split("?")[0]))
+        if not os.path.isfile(path):
+            req = urllib.request.Request(path_or_url, headers={"User-Agent": "cave-hub"})
+            with urllib.request.urlopen(req, timeout=60) as resp, open(path, "wb") as f:
+                f.write(resp.read())
+    return load_float(path)[:, :, :3].astype(np.float64)
+
+
+def light_dir(elevation_deg, azimuth_deg):
+    """빛이 오는 쪽(고도, 방위: +X 에서 반시계)으로 빛이 나아가는 방향 벡터."""
+    el, az = math.radians(elevation_deg), math.radians(azimuth_deg)
+    return Vector((-math.cos(el) * math.cos(az), -math.cos(el) * math.sin(az), -math.sin(el)))
+
+
+def add_light(scene, kind, name, loc, color, energy, radius=0.2, target=None, cone_deg=30.0, blend=0.6):
+    data = bpy.data.lights.new(name, type=kind)
+    data.energy, data.color, data.shadow_soft_size = energy, color, radius
+    if kind == "SPOT":
+        data.spot_size, data.spot_blend = math.radians(cone_deg), blend
+    ob = bpy.data.objects.new(name, data)
+    ob.location = loc
+    if target is not None:
+        ob.rotation_euler = (Vector(target) - Vector(loc)).to_track_quat("-Z", "Y").to_euler()
+    scene.collection.objects.link(ob)
+    ob.hide_render = True
+    return ob
+
+
+def render_light(plan, scene, cam, cfg, args, out_path, report):
+    """시간대마다 곱하기(mul) · 더하기(glow) · 미리보기를 굽는다.
+
+    mul  = 그 시간대의 자연광 ÷ 낮 조명(구조 그림의 Sun + world)이 열린 바닥에 주는 밝기. 흰색 = 그대로.
+           낮의 해가 드리운 그림자는 칠한 지도에 없으므로 기준에 넣지 않는다(넣으면 그림자가 거꾸로 찍힌다).
+    glow = 빛을 내는 것만: 등불 · 문 앞 불빛 · 달빛(밤), 빛줄기(아침), 낮게 깔린 안개(새벽). 검정 = 없음.
+    두 그림 모두 화면값(감마 2.2)이라 칠한 지도에 곱하고 → 더하면 된다.
+    """
+    lc = cfg["light"]
+    names = list(lc["times"]) if args.light == "all" else [n.strip() for n in args.light.split(",")]
+    for n in names:
+        if n not in lc["times"]:
+            raise SystemExit(f"--light {n}: 설정에 없는 시간대 (있는 것: {', '.join(lc['times'])})")
+    W_full, H_full = cfg["image"]["width"], cfg["image"]["height"]
+    scale = lc["width"] / W_full
+    w, h = lc["width"], int(round(H_full * scale))
+    albedo, sigma = lc["albedo"], lc["blur_px"]
+    tmp = os.path.join(bpy.app.tempdir, "cave_light")
+    os.makedirs(tmp, exist_ok=True)
+    r, cyc = scene.render, scene.cycles
+    r.engine, cyc.device = "CYCLES", "CPU"
+    scene.view_settings.view_transform, scene.view_settings.look = "Standard", "None"
+    sun = bpy.data.objects["Sun"]
+    bg = scene.world.node_tree.nodes["Background"]
+
+    # 낮 기준: 구조 그림의 조명이 가리는 것 없는 수평 바닥에 주는 밝기 (해는 세기 × sin(고도) ÷ π)
+    day_dir = sun.rotation_euler.to_matrix() @ Vector((0.0, 0.0, -1.0))
+    day_world = np.array(bg.inputs["Color"].default_value[:3]) * bg.inputs["Strength"].default_value
+    k_day = day_world + np.array(sun.data.color[:]) * sun.data.energy * abs(day_dir.z) / math.pi
+    log(f"빛 그림: {names}, {w}x{h}, 낮 기준 밝기 {np.round(k_day, 3).tolist()}")
+
+    # (0) 위치 패스: 픽셀마다 세계 좌표 (안개 · 확인용)
+    def mat_position(nt, em):
+        geo = nt.nodes.new("ShaderNodeNewGeometry")
+        mad = nt.nodes.new("ShaderNodeVectorMath")
+        mad.operation = "MULTIPLY_ADD"
+        mad.inputs[1].default_value = (1 / 240.0, 1 / 240.0, 1 / 80.0)
+        mad.inputs[2].default_value = (0.5, 0.5, 0.5)
+        nt.links.new(geo.outputs["Position"], mad.inputs[0])
+        nt.links.new(mad.outputs["Vector"], em.inputs["Color"])
+
+    saved_strength = bg.inputs["Strength"].default_value
+    bg.inputs["Strength"].default_value = 0.0
+    render_data_pass(scene, emission_material("Pass_position", mat_position), os.path.join(tmp, "pos.exr"), scale)
+    pos = load_float(os.path.join(tmp, "pos.exr"))[:, :, :3].astype(np.float64)
+    hit = pos.sum(axis=2) > 1e-4
+    wx, wy, wz = (pos[:, :, 0] - 0.5) * 240.0, (pos[:, :, 1] - 0.5) * 240.0, (pos[:, :, 2] - 0.5) * 80.0
+
+    # 조명 패스 공통 설정: 회색 무광 점토, 32비트 EXR
+    clay = principled("Light_clay", (albedo, albedo, albedo), 1.0)
+    black = principled("Light_black", (0.0, 0.0, 0.0), 1.0)
+    for mat in (clay, black):
+        bsdf = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+        if "Specular IOR Level" in bsdf.inputs:
+            bsdf.inputs["Specular IOR Level"].default_value = 0.0
+    r.resolution_percentage = int(round(100 * scale))
+    r.image_settings.file_format, r.image_settings.color_mode, r.image_settings.color_depth = "OPEN_EXR", "RGB", "32"
+    cyc.samples, cyc.use_adaptive_sampling = lc["samples"], True
+    cyc.pixel_filter_type, cyc.filter_width = "BLACKMAN_HARRIS", 1.5
+    cyc.max_bounces, cyc.volume_bounces = 4, 0
+    try:
+        import _cycles
+        cyc.use_denoising = bool(getattr(_cycles, "with_openimagedenoise", False))
+    except ImportError:
+        cyc.use_denoising = False
+
+    def shot(tag, lights, surface=None, bounces=4):
+        """주어진 광원만 켜고, 모든 표면을 한 재질(기본 회색 점토)로 바꿔 굽는다 → (H, W, 3) 선형 밝기."""
+        for ob in scene.objects:
+            if ob.type == "LIGHT":
+                ob.hide_render = ob not in lights
+        meshes = [ob for ob in scene.objects if ob.type == "MESH" and ob.name != "Light_haze"]
+        kept = [ob.data.materials[0] for ob in meshes]
+        for ob in meshes:
+            ob.data.materials[0] = surface or clay
+        cyc.max_bounces = bounces
+        path = os.path.join(tmp, f"{tag}.exr")
+        secs = render(scene, path)
+        for ob, mat in zip(meshes, kept):
+            ob.data.materials[0] = mat
+        return load_float(path)[:, :, :3].astype(np.float64), secs
+
+    # 빛줄기용 엷은 연무 상자 (아침): 표면은 검게, 빛이 연무에 흩어진 것만 남긴다
+    haze_mat = bpy.data.materials.new("Light_haze")
+    if bpy.app.version < (5, 0, 0):
+        haze_mat.use_nodes = True
+    nt = haze_mat.node_tree
+    nt.nodes.clear()
+    scatter = nt.nodes.new("ShaderNodeVolumeScatter")
+    nt.links.new(scatter.outputs["Volume"], nt.nodes.new("ShaderNodeOutputMaterial").inputs["Volume"])
+    xs, ys, zs = wx[hit], wy[hit], wz[hit]
+    g = Geo()
+    g.box((xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2, (xs.max() - xs.min()) / 2 + 3, zs.min() - 1, zs.max() + 8,
+          half_y=(ys.max() - ys.min()) / 2 + 3)
+    haze = g.obj("Light_haze", haze_mat, scene.collection)
+    haze.hide_render = True
+
+    falls = bpy.data.objects.get("Waterfalls")
+    fall_pts = np.array([falls.matrix_world @ v.co for v in falls.data.vertices]) if falls else np.zeros((0, 3))
+    low = plan.lower if plan.two else None
+    doors = [(v_add(v_add(rm["P"], rm["d"], rm["L"]), rm["d"], -0.7), rm["zf"] + 1.5) for rm in plan.rooms + (plan.lower_rooms if plan.two else [])]
+    base_img = None
+    out = report.setdefault("light", {})
+
+    for name in names:
+        tc = lc["times"][name]
+        t0 = time.perf_counter()
+        made = []
+        # ---- 곱하기: 자연광(해 · 달 · 들이치는 햇살)이 표면에 주는 밝기 ÷ 낮 기준 ----
+        sc = tc.get("sun")
+        natural = []
+        if sc:
+            sun.data.energy, sun.data.color = sc["energy"], sc["color"]
+            sun.data.angle = math.radians(sc.get("angle_deg", 7))
+            sun.rotation_euler = light_dir(sc["elevation_deg"], sc["azimuth_deg"]).to_track_quat("-Z", "Y").to_euler()
+            natural.append(sun)
+        beams = []
+        for k, bc in enumerate(tc.get("beams", [])):            # 들이치는 빛: 구조에서 자리를 잡는다
+            if bc["where"] == "north":                           # 북쪽 천장 폭포 쪽에서 호수로
+                x = bc["x"]
+                src = (x * 0.6, plan.canopy_y + bc.get("back", 3.0), plan.canopy_zt + bc.get("up", 5.0))
+                dst = (x, plan.oval.b - bc["reach"], 0.0)
+            elif bc["where"] == "entrance" and low:              # 입구(왼쪽 아래 폭포 옆)에서 홀로
+                ex, ey, ez = low["entrance"]
+                src = (ex - 3.0 + bc["x"], ey - 4.0, ez + bc.get("up", 9.0))
+                dst = (bc["x"], low["hall_y"] + bc.get("reach", 0.0), low["z"])
+            else:
+                continue
+            beams.append(add_light(scene, "SPOT", f"beam_{name}_{k}", src, bc["color"], bc["power"], radius=0.6,
+                                   target=dst, cone_deg=bc["cone_deg"], blend=bc.get("blend", 0.7)))
+        spots = []
+        for k, sp in enumerate(tc.get("fall_light", [])):        # 폭포를 비추는 빛(달빛): 폭포 조각마다 하나
+            if not len(fall_pts):
+                break
+            groups = [fall_pts[(fall_pts[:, 1] > 0) & (fall_pts[:, 0] < 0)], fall_pts[(fall_pts[:, 1] > 0) & (fall_pts[:, 0] >= 0)], fall_pts[fall_pts[:, 1] <= 0]]
+            for j, pts in enumerate(groups):
+                if not len(pts):
+                    continue
+                c = pts.mean(axis=0)
+                top = pts[:, 2].max()
+                low_z = pts[:, 2].min()
+                src = (c[0], c[1] - 11.0, top + 6.0)
+                spots.append(add_light(scene, "SPOT", f"fall_{name}_{k}_{j}", src, sp["color"], sp["power"], radius=1.0,
+                                       target=(c[0], c[1], max(low_z, top - 9.0) + 2.5), cone_deg=sp["cone_deg"], blend=0.9))
+        direct = np.zeros((h, w, 3))
+        secs = 0.0
+        if natural or beams or (spots and tc.get("fall_in_mul", True)):
+            direct, secs = shot(f"{name}_mul", natural + beams + (spots if tc.get("fall_in_mul", True) else []))
+        ambient = np.array(tc["world"]) * tc["world_strength"]
+        ratio = (ambient[None, None, :] + direct / albedo) / k_day[None, None, :]
+        mul = np.clip(ratio, 0.0, 1.0) ** (1 / 2.2)
+        mul[~hit] = np.clip(ambient / k_day, 0, 1) ** (1 / 2.2)
+        mul = gaussian_blur(mul, sigma)
+
+        # ---- 더하기: 빛을 내는 것만 ----
+        glow_lin = np.zeros((h, w, 3))
+        gc = tc.get("glow", {})
+        emitters = []
+        if gc.get("lanterns"):
+            lcfg = gc["lanterns"]
+            emitters += [add_light(scene, "POINT", f"lantern_{name}_{k}", (x, y, z + lcfg.get("lift", 0.6)), lcfg["color"], lcfg["power"], radius=0.25)
+                         for k, (x, y, z) in enumerate(LANTERNS)]
+        if gc.get("doors"):
+            dcfg = gc["doors"]
+            emitters += [add_light(scene, "POINT", f"door_{name}_{k}", (x, y, z), dcfg["color"], dcfg["power"], radius=0.3)
+                         for k, ((x, y), z) in enumerate(doors)]
+        if gc.get("fall_gain") and spots:
+            for ob in spots:
+                ob.data.energy *= gc["fall_gain"]
+            emitters += spots
+        if emitters:
+            lit, s2 = shot(f"{name}_glow", emitters, bounces=gc.get("bounces", 1))
+            glow_lin += lit / albedo * gc.get("gain", 1.0)
+            secs += s2
+        if gc.get("shafts") and beams:                           # 빛줄기: 연무에 흩어진 빛
+            sh = gc["shafts"]
+            scatter.inputs["Density"].default_value = sh["density"]
+            scatter.inputs["Anisotropy"].default_value = sh.get("anisotropy", 0.3)
+            haze.hide_render = False
+            saved = cyc.samples
+            cyc.samples = sh.get("samples", lc["samples"])
+            lit, s2 = shot(f"{name}_shafts", beams, surface=black, bounces=0)
+            cyc.samples = saved
+            haze.hide_render = True
+            glow_lin += lit * sh.get("gain", 1.0)
+            secs += s2
+        if gc.get("fog"):                                        # 낮게 깔린 안개: 수면 · 아래층 바닥에서의 높이로 셈한다
+            fc = gc["fog"]
+            wisp = np.clip(0.5 + 0.8 * fbm(wx + 517.0, wy + 731.0, fc.get("seed", 11), fc.get("scale", 0.16), 3), 0.0, 1.0)   # 결이 있는 안개
+            t_lake = plan.oval.tcoord(wx, wy)
+            near_lake = 1.0 - smoothstep(0.2, fc.get("spill", 2.2), t_lake)
+            dens = near_lake * np.exp(-np.clip(wz, 0.0, None) / fc["height"]) * (wz > -2.0)
+            pool = 1.0 - smoothstep(plan.pool_r, plan.pool_r + 2.0, np.hypot(wx, wy - plan.pool_y))
+            dens = np.maximum(dens, pool * np.exp(-np.clip(wz, 0.0, None) / fc["height"]) * (wz > -2.0))
+            if low:
+                near_hall = 1.0 - smoothstep(low["hall_radius"] + 1.0, low["hall_radius"] + fc.get("hall_spill", 7.0), np.hypot(wx, wy - low["hall_y"]))
+                dens = np.maximum(dens, near_hall * np.exp(-np.clip(wz - low["z"], 0.0, None) / fc["height"]) * (wz > low["z"] - 1.5))
+            glow_lin += (dens * wisp * hit)[:, :, None] * np.array(fc["color"])[None, None, :] * fc["strength"]
+        # 화면값으로: 어두운 바탕 위에 더하므로 희미한 빛이 뿌옇게 번지지 않게 바닥(floor)을 빼고 감마를 조금 낮춘다
+        floor = gc.get("floor", 0.0)
+        glow = np.clip((glow_lin - floor) / (1.0 - floor), 0.0, 1.0) ** (1 / gc.get("gamma", 2.2))
+        glow = gaussian_blur(glow, sigma)
+        for lname in {ob.name for ob in beams + spots + emitters}:   # 다음 시간대에 남지 않게 지운다
+            data = bpy.data.objects[lname].data
+            bpy.data.objects.remove(bpy.data.objects[lname])
+            bpy.data.lights.remove(data)
+
+        info = {"render_sec": round(secs, 1)}
+        for kind, arr in (("mul", mul), ("glow", glow)):
+            path = out_path(f"cave-light-{name}-{kind}.webp")
+            q, size = save_webp(path, arr, lc["target_kb"])
+            info[kind] = {"file": os.path.basename(path), "quality": q, "kb": round(size / 1024, 1),
+                          "mean": [round(float(v), 3) for v in arr.reshape(-1, 3).mean(axis=0)]}
+            made.append(path)
+        # 확인용 미리보기: 칠한 지도에 곱하고 → 더한다
+        base_src = args.light_base or lc.get("base")
+        if base_src:
+            if base_img is None:
+                full = load_display(base_src, tmp)
+                fh, fw = full.shape[:2]
+                if fw % w or fh % h or fw // w != fh // h:
+                    raise SystemExit(f"칠한 지도 크기 {fw}x{fh} 가 빛 그림 {w}x{h} 의 정수배가 아니다")
+                f = fw // w
+                base_img = full.reshape(h, f, w, f, 3).mean(axis=(1, 3))
+            path = out_path(f"cave-light-{name}-preview.webp")
+            q, size = save_webp(path, np.clip(base_img * mul + glow, 0.0, 1.0), lc.get("preview_kb"))
+            info["preview"] = {"file": os.path.basename(path), "quality": q, "kb": round(size / 1024, 1)}
+        info["total_sec"] = round(time.perf_counter() - t0, 1)
+        out[name] = info
+        log(f"  {name}: mul 평균 {info['mul']['mean']} ({info['mul']['kb']}KB q{info['mul']['quality']}), "
+            f"glow 평균 {info['glow']['mean']} ({info['glow']['kb']}KB q{info['glow']['quality']}), 렌더 {secs:.1f}s")
+    bg.inputs["Strength"].default_value = saved_strength
+
+
 def cubic_path(points):
     """점들을 지나는 매끄러운 SVG path (Catmull-Rom → 3차 베지어)."""
     p = [np.array(q, dtype=float) for q in points]
@@ -1479,6 +1793,14 @@ def main():
         with open(out_path("cave-report.json"), "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=1)
         raise SystemExit(2)
+
+    if args.light:                      # 시간대 빛 그림만 뽑고 끝낸다
+        render_light(plan, scene, cam, cfg, args, out_path, report)
+        report["times_sec"] = {"total": round(time.perf_counter() - t_start, 1)}
+        with open(out_path("cave-light-report.json"), "w", encoding="utf-8") as f:
+            json.dump({"light": report["light"], "times_sec": report["times_sec"]}, f, ensure_ascii=False, indent=1)
+        log(f"빛 그림 전체 {report['times_sec']['total']}s -> {os.path.abspath(args.out)}")
+        return
 
     # ---- 렌더 ----
     times = {}

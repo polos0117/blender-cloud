@@ -161,6 +161,21 @@ BLENDER_BIN=/workspace/.cloud-tools/blender/blender python3 tests/cave_hub_test.
 
 추가 옵션: `--samples N`, `--scale 0.5`, `--check-only`, `--no-blend`, `--blend 경로`, `--config 설정.json`.
 
+### 시간대 빛 그림 (`--light`)
+
+칠한 지도(허브 `img/cave4.webp`)는 다시 칠하지 않고, 같은 카메라로 구운 빛 그림을 그 위에 겹쳐 시간대를 바꾼다. 낮은 지금 그림 그대로라 뽑지 않는다.
+
+```bash
+~/blender/blender -b --python scenes/cave_hub.py -- --out renders/ --light all      # dawn · morning · night, 쉼표로 골라도 된다
+```
+
+시간대마다 512×1536 WebP 세 장이 나온다: `cave2-light-<시간대>-mul.webp`(곱하기), `-glow.webp`(더하기), `-preview.webp`(칠한 지도에 곱하기 → 더하기를 해 본 확인용). `--light` 를 주면 구조 그림과 `.blend` 는 건너뛴다(길 검사는 그대로 한다). 2026-11-12 기준 세 시간대 전체 94초.
+
+- **곱하기(mul)**: 그 시간대의 자연광 ÷ 낮 조명(구조 그림의 Sun 1.4 + world)이 열린 바닥에 주는 밝기. 흰색이면 그대로, 어두울수록 어두워진다. 발광은 넣지 않는다. 낮의 해가 드리운 그림자는 칠한 지도에 없어서 기준에서 뺐다(넣으면 그 그림자가 거꾸로 밝게 찍힌다).
+- **더하기(glow)**: 빛을 내는 것만. 새벽 = 호수 · 아래층 홀에 낮게 깔린 푸른 안개, 아침 = 북쪽 천장 폭포 쪽과 입구 쪽에서 들이치는 빛줄기, 밤 = 등불 기둥 · 방 문 앞의 주황 불빛과 폭포의 달빛. 검정이면 없음.
+- 두 그림 모두 화면값(감마 2.2)이고, 칠한 지도와 구조가 10~25px 어긋나 있어 σ 4px(빛 그림 픽셀 = 지도 8px)로 흐렸다. 허브에서는 지도 위에 mul 을 `multiply`, 그 위에 glow 를 `screen`(또는 `plus-lighter`)으로 얹으면 된다.
+- 값은 `cave_hub.json` 의 `light.times` 에 있다. `world_strength` = 그 시간대의 바탕 밝기(밤에 방이 안 보이면 이걸 올린다), `sun` = 해의 세기 · 색 · 고도 · 방위, `beams` = 들이치는 햇살, `glow.lanterns` · `doors` = 점광원 세기, `glow.fog` = 안개, `glow.shafts` = 빛줄기, `fall_light` = 폭포 달빛. 미리보기 바탕은 `light.base`(또는 `--light-base 경로`).
+
 ## 4. 도트 인물 뼈대 (종이 인형 방식)
 
 확정된 **정지 도트 한 장**을 부위별로 잘라 Blender 뼈대로 움직인다. 모든 칸이 같은 픽셀 조각에서 나오니 얼굴 · 옷 · 키가 칸마다 흔들리지 않고, 칸 수도 늘릴 수 있다. 첫 시험은 앨리스(192×256)다.
