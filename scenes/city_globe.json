@@ -1,0 +1,36 @@
+{
+  "_comment": "도시 공방 지구본 모형 셋(scenes/city_globe.py). 색은 city-atelier lib/room.css 의 어두운 판(--sea · --land · --land-line · --grat). sea · land 는 검사(city_globe_check.py)도 읽는다 — 바탕 텍스처의 땅 / 바다를 이 두 색으로 가른다. sea_rough · land_rough 를 0.4 아래로 내리면 방향광이 화면 가운데 왼쪽 위(도시 점이 서는 자리)에 하얗게 맺힌다. gain = 웹의 빛(앰비언트 1.2 + 방향광 1.6, 환경맵 없음)에서 SVG 색과 비슷해 보이도록 바탕색에 곱하는 값(선형). coast_px · grat_px = 2048 폭 텍스처에서의 선 굵기.",
+  "texture": { "width": 2048, "height": 1024, "supersample": 2, "orm_width": 1024, "jpeg_quality": 85 },
+  "sphere": { "segments": 96, "rings": 48 },
+  "still": { "size": 1024, "samples": 96, "ortho_scale": 2.66, "center_z": -0.12, "city": "서울", "lat": 37.57, "lon": 126.98 },
+  "light": { "ambient": 1.2, "sun": 1.6, "sun_from": [-2, -5, 3] },
+  "limits": { "top": 1.15, "bottom": -1.39, "side": 1.2, "glb_bytes": 1500000, "globe_tris": 10000, "stand_tris": 30000 },
+  "board": {
+    "fantasy": { "dark": "#1c0810", "light": "#f9f0e1" },
+    "steampunk": { "dark": "#131211", "light": "#e9e4dc" },
+    "cyberpunk": { "dark": "#07061a", "light": "#eef0f7" }
+  },
+  "worlds": {
+    "fantasy": {
+      "name": "판타지 — 금 받침 위 남빛 지구본",
+      "sea": "#17306a", "land": "#c9a24a", "coast": "#f3d98a", "grat": "#f3d98a", "grat_alpha": 0.3,
+      "accent": "#f4d54c", "accent2": "#e0475a",
+      "gain": 1.25, "coast_px": 2.4, "grat_px": 1.5,
+      "sea_rough": 0.48, "sea_metal": 0.0, "land_rough": 0.5, "land_metal": 0.38, "emboss": 1.6
+    },
+    "steampunk": {
+      "name": "스팀펑크 — 톱니 테와 놋쇠 기둥의 그을린 기계 지구본",
+      "sea": "#3a2f26", "land": "#a27a42", "coast": "#e8b56a", "grat": "#e8b56a", "grat_alpha": 0.22,
+      "accent": "#e8602a", "accent2": "#c98a52", "patina": "#4f8a7a",
+      "gain": 1.4, "coast_px": 2.4, "grat_px": 1.4,
+      "sea_rough": 0.55, "sea_metal": 0.35, "land_rough": 0.42, "land_metal": 0.45, "emboss": 1.8
+    },
+    "cyberpunk": {
+      "name": "사이버펑크 — 네온 선 홀로그램 구와 빛나는 고리 받침",
+      "sea": "#0a091e", "land": "#0c1b30", "land_tint": 0.08, "coast": "#23e6ff", "grat": "#ff3fae", "grat_alpha": 0.3,
+      "accent": "#ff3fae", "accent2": "#23e6ff",
+      "gain": 1.0, "coast_px": 3.0, "grat_px": 1.6,
+      "sea_rough": 0.5, "sea_metal": 0.0, "land_rough": 0.5, "land_metal": 0.0, "emboss": 0.0
+    }
+  }
+}

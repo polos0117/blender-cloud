@@ -14,6 +14,8 @@ Linux 서버(GUI 없음)에서 Blender를 **headless**로 실행해 씬을 만�
 | `scenes/cave_hub.py` · `cave_hub.json` | 공방 허브 「대미궁」 지도의 3D 구조 생성 + 렌더 + 좌표 출력 (아래 3절) |
 | `scenes/cave_hub.blend` | 위 스크립트가 저장한 대미궁 씬 |
 | `scenes/dot_rig.py` · `scenes/dot_rig/` | 도트 인물을 부위별로 잘라 뼈대로 움직이기 (아래 4절) |
+| `scenes/city_globe.py` · `city_globe.json` · `city_globe_check.py` | 도시 공방 지구본 모형 셋(판타지 · 스팀펑크 · 사이버펑크) 짓기 · glb 내보내기 · 검사 (아래 5절) |
+| `scenes/city_globe_<세계>.blend` | 위 스크립트가 저장한 지구본 씬 셋 |
 | `renders/` | 렌더 작업 폴더(커밋 안 함) — 결과물은 그림 저장소로 옮긴다 |
 
 Blender 바이너리는 저장소에 포함하지 않습니다(기본 설치 위치 `~/blender`, `.gitignore` 참고).
@@ -220,6 +222,53 @@ BLENDER_BIN=/workspace/.cloud-tools/blender/blender python3 tests/cave_hub_test.
 옵션: `--prefix 2026-11-11_`, `--parts-only`(부위 자르기와 확인용 그림까지만), `--source 파일.png`(받지 않고 로컬 파일 사용), `--scale 4`, `--no-blend`.
 
 2026-11-11 기준(4 vCPU): 칸 15장 렌더 32초, 전체 35초.
+
+## 5. 도시 공방 지구본 (모형 셋)
+
+도시 공방(city-atelier) 첫 화면의 회전 무대 위 지구본을 Blender 모형으로 — 판타지 · 스팀펑크 · 사이버펑크(2026-11-27).
+웹은 three.js r170 의 `GLTFLoader` 로 `models/globe/<세계>.glb` 를 읽고, 도시 점은 그 위에 SVG 로 겹쳐 그린다. 그래서 **좌표 약속이 1도라도 어긋나면 점이 엉뚱한 나라 위에 뜬다.**
+
+```bash
+~/blender/blender -b -P scenes/city_globe.py -- --world fantasy     # 하나
+~/blender/blender -b -P scenes/city_globe.py -- --world all         # 셋 + 비교판(약 2분, 4 vCPU)
+#   --no-render(내보내기 · 검사만) · --samples N · --board-only(있는 정지 그림으로 비교판만)
+python3 scenes/city_globe_check.py                                  # 검사만(Pillow 가 없으면 blender -b -P scenes/city_globe_check.py -- <glb>)
+```
+
+작업 폴더 `renders/city-globe/`(올리지 않는다): `<세계>.glb` · `<세계>-still.webp`(1024×1024, 투명 배경, 웹이 서울을 가운데 둘 때의 모습) · `compare.webp`(위 줄 어두운 화면 · 아래 줄 밝은 화면의 바탕색 위) · `tex/` · `report.json`. `.blend` 는 `scenes/city_globe_<세계>.blend`(텍스처를 싸 넣었다).
+색 · 굵기 · 거칠기는 `scenes/city_globe.json`, 받침의 꼴은 `city_globe.py` 의 `stand_<세계>()`.
+
+### 좌표 약속 (어기면 안 됨)
+
+| | |
+| --- | --- |
+| 웹(three, Y-up) | `latLonToVec3(lat, lon) = [cos(lat)·sin(lon), sin(lat), cos(lat)·cos(lon)]` — 경도 0 = +Z(카메라 쪽) · 동경 90 = +X · 북극 = +Y · 반지름 1 |
+| Blender(Z-up) | glTF +Y Up 내보내기는 `three (x, y, z) = Blender (x, z, −y)` → `x = cos(lat)·sin(lon)`, `y = −cos(lat)·cos(lon)`, `z = sin(lat)` — 경도 0 = −Y(정면) · 동경 90 = +X · 북극 = +Z |
+| UV | 꼭짓점 위치에서 바로: `u = (lon + 180) / 360`, `v = (lat + 90) / 180`. 경도 ±180 이음매는 꼭짓점을 둘로(u = 0 과 1), 극은 칸마다 꼭짓점 하나(u = 그 칸의 가운데). glb 안의 glTF UV 는 위아래가 뒤집힌다(`v = 1 − Blender v`) |
+| 텍스처 | 정방형 도법 2048×1024 — 왼쪽 끝 경도 −180, 위 끝 북위 90 |
+| 노드 | `Globe`(구 — 이것과 그 자식만 돈다) · `Stand`(받침 · 고리 · 장식 — `Globe` 의 자식이 아니다). 웹이 매 프레임 `Globe.rotation.set(lat, −lon, 0, 'XYZ')` 로 덮어쓰니 둘 다 회전 0 · 크기 1 · 위치 0, 방향은 메시 데이터에 |
+| 화면 자리 | 직교 카메라가 −Y 쪽에서 본다. 받침은 위 z ≤ 1.15 · 양옆 \|x\| ≤ 1.2 · 아래 z ≥ −1.39 안, 구를 파고들지 않는다 |
+
+### 땅
+
+world-atlas `land-50m.json`(Natural Earth, 공유 저작물 — SVG 지구본과 같은 데이터)의 TopoJSON 을 직접 푼다(arcs 델타 복원 + transform). jsDelivr 가 막힌 곳에서는 npm 꾸러미(`world-atlas@2.0.2`)에서 같은 파일을 받는다.
+
+world-atlas 는 경도 −180 과 180 을 한 점으로 꿰어 둔다 — 추코트카(유라시아) · 피지 · 남극의 고리 다섯은 날짜변경선을 넘어가고, 그중 둘(남극)은 극을 한 바퀴 돈다. 그대로 칠하면 가로로 번져서: 고리마다 경도를 이어 붙이고, 극을 도는 고리는 극을 거쳐 닫고, 세 배 폭에 칠한 뒤 접어 겹친다(`raster_land`). 해안선은 흐린 땅 몫이 0.5 를 지나는 띠라서 이음매에 선이 서지 않는다.
+
+### 웹의 빛에 맞춘 재질
+
+웹에는 환경맵이 없다 — AmbientLight 1.2 + DirectionalLight 1.6(Blender (−2, −5, 3)에서). 미리보기도 같게: World 는 확산에만(세기 1.2 / π, 반사 · 카메라에는 안 보임), Sun 1.6, 그림자 · 가림 · 되튐 없음, 보기 변환 Standard.
+같은 glb 를 three.js r170 에 같은 빛 · 같은 카메라로 띄워 견줬더니 정지 그림과 화소값 차이가 몇 단계 안이었다(2026-11-27).
+
+- 금속은 metallic 0.3~0.45(1 이면 웹에서 까맣다), 바탕색은 밝게(`gain`).
+- 거칠기를 0.4 아래로 내리면 방향광이 화면 가운데 왼쪽 위 — 도시 점이 서는 자리 — 에 하얗게 맺힌다. 바다 · 땅 모두 0.48 이상.
+- 재질은 Principled BSDF + 이미지 텍스처만(바탕 · 거칠기/금속 · 노멀 · 발광). 잡음(그을음 · 녹청)은 구 위의 3D 값 잡음을 이미지로 구웠다.
+- 옅은 선(경위선 · 해안선)은 화면값(sRGB)에서 얹는다 — CSS 의 `rgb(… / .3)` 과 같은 셈. 선형에서 섞으면 어두운 바다 위에서 훨씬 밝아진다.
+- Blender 메모: `images.new` 로 만든 그림은 색 공간을 화소보다 **먼저** 정한다(뒤에 바꾸면 그림이 비워져 검게 저장된다).
+
+### 검사 (`scenes/city_globe_check.py` — 내보낸 뒤 바로 돈다)
+
+glb 를 파이썬으로 열어(JSON + 바이너리) glb 안의 값으로 본다: ① `Globe` · `Stand` 가 있고 `Stand` 는 자식이 아님 ② `Globe` 회전 0 · 크기 1 · 위치 0 ③ 반지름 1 ± 0.02 ④ ≤ 1.5MB · Draco / meshopt 없음 · 카메라 · 빛 · 애니메이션 없음 · 삼각형(Globe ≤ 1만 · Stand ≤ 3만) ⑤ (0,0,1) 의 u = 0.5 · (1,0,0) 의 u = 0.75 · 북극의 glTF v = 0 · 이음매의 u 는 0 과 1 ⑥ 바탕 텍스처에서 서울 · 파리 · 리우는 땅, 태평양 한가운데 · 남대서양은 바다 ⑦ `latLonToVec3(서울)` ≈ (0.633, 0.610, −0.477), 도시 아홉 방향이 지나는 삼각형의 UV 가 식과 같고(차 0.2화소 안) 서울 화소가 땅 ⑧ 받침이 화면 여백 안 · 구를 파고들지 않음.
 
 ## 테스트 결과 (참고)
 
